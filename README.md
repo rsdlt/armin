@@ -1,0 +1,122 @@
+<p align="center">
+  <em>Autocomplete for zsh that reads the battlefield. A menu of your next move, as you type.</em>
+</p>
+
+# armin
+
+[![CI](https://github.com/rsdlt/armin/actions/workflows/ci.yml/badge.svg)](https://github.com/rsdlt/armin/actions/workflows/ci.yml)
+
+> *I've studied every command you've ever run. I know what you're about to type.*
+
+armin opens a menu under your prompt as you type, listing the commands you're most likely
+after. It learns from your history: what you run often, what you ran lately, and what you
+run in this directory. `Tab` to pick, `Enter` to put it on the line.
+
+```
+% git s
+ git status
+ git stash pop
+ git switch staging
+```
+
+## Why armin
+
+zsh-autosuggestions shows one guess, the most recent command that starts with what you typed,
+and you accept it with `→`. If that guess is wrong, you keep typing and hope.
+
+armin shows the eight best guesses at once, like the completion menu in your editor. It ranks
+them by what you actually do: the command you run ten times a day beats the one you ran once
+this morning, and inside a project, that project's commands lead. A typo that failed with
+"command not found" never comes back.
+
+Named after the Survey Corps' strategist, armin is small and thinks ahead. He's not a
+completion framework: he does one thing, and he does it before you finish typing.
+
+## Enlist
+
+You need zsh.
+
+```sh
+brew install rsdlt/tap/armin
+```
+
+With Rust, run `cargo install armin`, or `cargo binstall armin` for a prebuilt binary. The
+[latest release](https://github.com/rsdlt/armin/releases/latest) has binaries for macOS and
+Linux.
+
+Then add armin to `~/.zshrc`, and bring in the history you already have:
+
+```sh
+eval "$(armin init zsh)"
+```
+
+```sh
+armin import    # reads ~/.zsh_history; run it once
+```
+
+armin draws where zsh-autosuggestions does, so remove that plugin. zsh-syntax-highlighting
+works alongside armin.
+
+## Orders
+
+Start typing. The menu opens after the first character and follows every keystroke.
+
+| Key | Action |
+|---|---|
+| `Tab` `S-Tab` | move through the menu |
+| `C-n` `C-p` | move through the menu |
+| `Enter` | put the selected command on the line; `Enter` again runs it |
+| `Esc` | close the menu |
+
+The selected command also shows as grey text after your cursor. `Enter` never runs a
+command you haven't looked at: with nothing selected, it runs the line as typed, like always.
+
+With the menu closed, every key does what it did before: `Tab` still completes files and
+flags, and in vi mode `Esc` still enters command mode.
+
+## Strategy
+
+Each past run of a command adds to its score, and older runs add less: a run a week ago counts
+half, a month ago a fifth. Runs in the directory you're in count again on top. A command that
+failed counts half, since `grep` finding nothing fails too. A command that only ever failed
+with "command not found" is dropped.
+
+Commands that start with what you typed come first. Below them, fuzzy matches fill in, so
+`gco` finds `git checkout`, with the matched letters in bold.
+
+## Intel
+
+armin records every command you run, with the directory it ran in, its exit code and how long
+it took. It writes in the background, so your prompt never waits. Everything stays on your
+machine, in a plain text file you can read, grep or delete: `~/.local/share/armin/history`
+(`$XDG_DATA_HOME/armin` or `$ARMIN_DATA_DIR`, if set).
+
+Like zsh, armin skips commands that start with a space when `HIST_IGNORE_SPACE` is set.
+
+## Configure
+
+Set these before the `eval` line:
+
+| Variable | Default | |
+|---|---|---|
+| `ARMIN_MAX_ROWS` | `8` | how many suggestions the menu shows |
+| `ARMIN_HL_MATCH` | `bold` | the letters that match what you typed |
+| `ARMIN_HL_SELECTED` | `standout` | the selected row |
+| `ARMIN_HL_GHOST` | `fg=8` | the grey text after the cursor |
+
+Colors use zsh's highlight syntax, like `fg=blue,bold`, and default to your terminal's palette.
+
+## Field report
+
+- **Swift.** About 2 ms per keystroke on a history of a thousand commands.
+- **Small.** About 1,000 lines of Rust and zsh, and two dependencies.
+- **Native.** armin draws through zsh's own line editor, not a window over your terminal, so
+  it works the same in tmux, zellij, herdr, screen and over ssh.
+
+armin is young. Coming up: a resident process so the menu stays instant with a hundred
+thousand commands, `armin bench` to measure the keystrokes armin saves you, suggestions on an
+empty line (what you usually run next), and zsh's own completions in the menu.
+
+## License
+
+[MIT](LICENSE). Free to use, like a map of the walls, shared with anyone who asks.
