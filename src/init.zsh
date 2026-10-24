@@ -1,40 +1,29 @@
-# armin, phase 0 spike: a blink.cmp-style popup drawn inside ZLE.
+# armin for zsh: eval "$(armin init zsh)" in ~/.zshrc.
 #
-# Pure zsh, no Rust yet. It answers one question: can a plugin draw a
-# multi-line, colored menu under the prompt that zsh itself redraws, scrolls
-# and clears? The menu lives in POSTDISPLAY (text zsh shows after the buffer)
-# and its colors in region_highlight, tagged memo=armin so other plugins'
-# highlights survive. Candidates are a plain prefix match over history; the
-# real ranking comes in Rust.
-#
-#   source spike/armin.zsh
+# The menu lives in POSTDISPLAY (text zsh shows after the buffer) and its
+# colors in region_highlight, tagged memo=armin so other plugins' highlights
+# survive. zsh then redraws, scrolls and clears it like the buffer itself.
 #
 # Keys while the menu is open: Tab / Shift-Tab and Ctrl-N / Ctrl-P move,
 # Enter fills the line with the selection (it does not run it), Esc closes.
 # With the menu closed, every key does what it did before.
 
-zmodload zsh/parameter
-autoload -Uz add-zle-hook-widget
+zmodload zsh/datetime zsh/parameter
+autoload -Uz add-zle-hook-widget add-zsh-hook
 
+typeset -g  _armin_bin=__ARMIN_BIN__
 typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
-typeset -g  ARMIN_HISTORY_SCAN=${ARMIN_HISTORY_SCAN:-5000}
+typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
+typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
+typeset -g  ARMIN_HL_GHOST=${ARMIN_HL_GHOST:-fg=8}
 
-typeset -ga _armin_hist       # unique history lines, newest first
-typeset -ga _armin_items      # what the open menu shows
+typeset -ga _armin_items      # commands the open menu shows
+typeset -ga _armin_marks      # per item: matched ranges, "start-end,..."
 typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
-typeset -g  _armin_seen=''    # buffer the menu was last computed for
+typeset -g  _armin_seen=''    # buffer and cursor the menu was computed for
 typeset -gi _armin_open=0
 
-# Refreshed before each prompt, so commands run this session show up.
-_armin_load_history() {
-  local -a keys=( ${(Onk)history} )
-  local k
-  _armin_hist=()
-  for k in ${keys[1,ARMIN_HISTORY_SCAN]}; do
-    _armin_hist+=( "${history[$k]}" )
-  done
-  _armin_hist=( ${(u)_armin_hist} )
-}
+# ── Suggesting ──────────────────────────────────────────────────────────────
 
 _armin_clear_display() {
   POSTDISPLAY=''
@@ -45,16 +34,25 @@ _armin_close() {
   _armin_open=0
   _armin_sel=0
   _armin_items=()
+  _armin_marks=()
   _armin_clear_display
 }
 
-# Fills _armin_items for the current buffer. Single-line buffers only.
+# Asks armin for the current buffer. Only with the cursor at the end of a
+# one-line buffer: anywhere else, a suggestion has nowhere to go.
 _armin_compute() {
   _armin_items=()
+  _armin_marks=()
   _armin_sel=0
   [[ -z $BUFFER || $BUFFER == *$'\n'* ]] && return
-  local -a matches=( ${(M)_armin_hist:#${(b)BUFFER}?*} )
-  _armin_items=( ${matches[1,ARMIN_MAX_ROWS]} )
+  (( CURSOR == ${#BUFFER} )) || return
+  local out item
+  out=$("$_armin_bin" suggest --cwd "$PWD" --limit $ARMIN_MAX_ROWS -- "$BUFFER" 2>/dev/null) || return
+  # One item per NUL: matched ranges, a tab, the command.
+  for item in ${(0)out}; do
+    _armin_marks+=( "${item%%$'\t'*}" )
+    _armin_items+=( "${item#*$'\t'}" )
+  done
 }
 
 _armin_render() {
@@ -68,46 +66,48 @@ _armin_render() {
   (( rows > LINES - 3 )) && rows=$(( LINES - 3 ))
   (( rows < 1 )) && { _armin_open=0; return }
 
-  local -i width=0 i
+  # A command spanning lines shows on one row, each newline as ↵.
+  local -a shown=( "${(@)${(@)_armin_items[1,rows]//$'\n'/↵}//$'\t'/ }" )
+  local -i width=0 i s e
   local item
-  for item in ${_armin_items[1,rows]}; do
+  for item in $shown; do
     (( ${#item} > width )) && width=${#item}
   done
   (( width > COLUMNS - 4 )) && width=$(( COLUMNS - 4 ))
 
-  # Ghost text: the rest of the selected item, right after the cursor.
-  local ghost=''
-  (( _armin_sel )) && ghost=${_armin_items[_armin_sel]#$BUFFER}
+  # Ghost text: the rest of the selected item, right after the cursor. A fuzzy
+  # match doesn't continue what was typed, so it gets none.
+  local ghost='' sel=${_armin_items[_armin_sel]}
+  (( _armin_sel )) && [[ $sel == "$BUFFER"* ]] && ghost=${sel#"$BUFFER"}
 
-  local text=$ghost
+  local text=$ghost range
   local -i base=${#BUFFER} off
   local -a hl
-  (( ${#ghost} )) && hl+=( "$base $(( base + ${#ghost} )) fg=8,memo=armin" )
+  (( ${#ghost} )) && hl+=( "$base $(( base + ${#ghost} )) $ARMIN_HL_GHOST,memo=armin" )
 
-  local row
   for (( i = 1; i <= rows; i++ )); do
-    item=${_armin_items[i]}
+    item=${shown[i]}
     (( ${#item} > width )) && item="${item[1,width-1]}…"
-    row=" ${(r:width:)item} "
     text+=$'\n'
     off=$(( base + ${#text} ))
-    text+=$row
-    if (( i == _armin_sel )); then
-      hl+=( "$off $(( off + ${#row} )) standout,memo=armin" )
-    else
-      # The part already typed in bold, the rest plain.
-      hl+=( "$(( off + 1 )) $(( off + 1 + ${#BUFFER} )) bold,memo=armin" )
-    fi
+    text+=" ${(r:width:)item} "
+    (( i == _armin_sel )) && hl+=( "$off $(( off + width + 2 )) $ARMIN_HL_SELECTED,memo=armin" )
+    for range in ${(s:,:)_armin_marks[i]}; do
+      s=${range%-*} e=${range#*-}
+      (( e > width )) && e=width
+      (( s < e )) && hl+=( "$(( off + 1 + s )) $(( off + 1 + e )) $ARMIN_HL_MATCH,memo=armin" )
+    done
   done
 
   POSTDISPLAY=$text
   region_highlight+=( $hl )
 }
 
-# Runs before every redraw: recompute only when the buffer changed.
+# Runs before every redraw: ask armin again only when the buffer or the
+# cursor moved.
 _armin_pre_redraw() {
-  [[ $BUFFER == $_armin_seen ]] && return
-  _armin_seen=$BUFFER
+  [[ "$CURSOR:$BUFFER" == $_armin_seen ]] && return
+  _armin_seen="$CURSOR:$BUFFER"
   _armin_compute
   _armin_render
 }
@@ -127,6 +127,8 @@ _armin_move() {
   _armin_sel=$(( (_armin_sel - 1 + $1 + n) % n + 1 ))
   _armin_render
 }
+
+# ── Keys ────────────────────────────────────────────────────────────────────
 
 # Each key acts on the menu when it is open. Otherwise it runs the widget it
 # was bound to before armin, or nothing if it had none.
@@ -150,7 +152,7 @@ _armin_accept() {
   if (( _armin_open && _armin_sel )); then
     BUFFER=${_armin_items[_armin_sel]}
     CURSOR=${#BUFFER}
-    _armin_seen=$BUFFER
+    _armin_seen="$CURSOR:$BUFFER"
     _armin_close
   else
     _armin_close
@@ -196,6 +198,29 @@ TRAPINT() {
   return $(( 128 + $1 ))
 }
 
-autoload -Uz add-zsh-hook
-add-zsh-hook precmd _armin_load_history
-_armin_load_history
+# ── Recording ───────────────────────────────────────────────────────────────
+
+typeset -g _armin_session="$$-$EPOCHSECONDS"
+typeset -g _armin_cmd='' _armin_cmd_pwd='' _armin_start=''
+
+# The command as typed, and where it started: a cd changes $PWD before it ends.
+_armin_preexec() {
+  [[ -o hist_ignore_space && $1 == ' '* ]] && return
+  _armin_cmd=$1
+  _armin_cmd_pwd=$PWD
+  _armin_start=$EPOCHREALTIME
+}
+
+# Records in the background, so the prompt never waits on the disk.
+_armin_precmd() {
+  local -i exit=$?
+  [[ -n $_armin_cmd ]] || return
+  local -i ms=$(( (EPOCHREALTIME - _armin_start) * 1000 ))
+  "$_armin_bin" record --time ${_armin_start%.*} --duration $ms --exit $exit \
+    --session $_armin_session --cwd "$_armin_cmd_pwd" -- "$_armin_cmd" &>/dev/null &!
+  _armin_cmd=''
+}
+
+# precmd first in line, so $? is still the command's.
+precmd_functions=( _armin_precmd ${precmd_functions:#_armin_precmd} )
+add-zsh-hook preexec _armin_preexec
