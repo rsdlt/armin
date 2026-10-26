@@ -7,6 +7,8 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-26
+
 ### Added
 
 - `Tab` with the menu closed opens it with zsh's own completions for the word you're on:
@@ -72,7 +74,8 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_MAX_ROWS`, `ARMIN_HL_MATCH`, `ARMIN_HL_SELECTED` and `ARMIN_HL_GHOST` set the menu's
   height and colors.
 
-[Unreleased]: https://github.com/rsdlt/armin/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rsdlt/armin/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rsdlt/armin/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rsdlt/armin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rsdlt/armin/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rsdlt/armin/releases/tag/v0.1.0
