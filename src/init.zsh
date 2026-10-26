@@ -20,10 +20,14 @@ typeset -g  _armin_version=__ARMIN_VERSION__
 typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
 typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
 typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
+typeset -g  ARMIN_HL_DESCRIPTION=${ARMIN_HL_DESCRIPTION:-fg=8}
 
 typeset -ga _armin_items      # what the open menu shows
 typeset -ga _armin_marks      # per item: matched ranges, "start-end,..."
 typeset -ga _armin_lines      # per item: the line that picking it leaves
+typeset -ga _armin_descs      # per item: where its description starts, if any
+typeset -gi _armin_col=0      # the buffer column the menu lines up under
+typeset -gi _armin_prompt=0   # the width of the prompt's last line
 typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
 typeset -gi _armin_top=1      # the item on the menu's first row
 typeset -g  _armin_typed=''   # the buffer the menu was computed for
@@ -74,6 +78,8 @@ _armin_close() {
   _armin_items=()
   _armin_marks=()
   _armin_lines=()
+  _armin_descs=()
+  _armin_col=0
   _armin_clear_display
 }
 
@@ -83,6 +89,8 @@ _armin_compute() {
   _armin_items=()
   _armin_marks=()
   _armin_lines=()
+  _armin_descs=()
+  _armin_col=0
   _armin_sel=0
   _armin_top=1
   _armin_typed=$BUFFER
@@ -96,6 +104,8 @@ _armin_predict() {
   _armin_items=()
   _armin_marks=()
   _armin_lines=()
+  _armin_descs=()
+  _armin_col=0
   _armin_sel=0
   _armin_top=1
   _armin_typed=$BUFFER
@@ -130,7 +140,7 @@ _armin_fetch() {
 
 # What a capture found, per match: the row to show, its matched ranges, the
 # text that replaces the word, and how many characters of the word that is.
-typeset -ga _armin_cshow _armin_cmark _armin_ctext _armin_ccut
+typeset -ga _armin_cshow _armin_cmark _armin_ctext _armin_ccut _armin_cdesc
 typeset -g  _armin_cquote=''
 
 # Stands in for compadd while armin captures: lets zsh decide which matches
@@ -149,7 +159,7 @@ _armin_compadd() {
   builtin compadd -A _armin_hits -D _armin_dscr "$@"
   local ret=$?
   (( $#_armin_hits )) || return $ret
-  local hidden=${(v)_armin_hpre} word text show mark dir=${(v)_armin_wdir}
+  local hidden=${(v)_armin_hpre} word text show mark rest dir=${(v)_armin_wdir}
   local typed=${PREFIX#"$hidden"}
   local -i i
   [[ -z $dir && -n $_armin_isfile ]] && dir=${(Qe)~${:-$IPREFIX$hidden}}
@@ -164,7 +174,11 @@ _armin_compadd() {
     if (( ${+_armin_sfx[-S]} )); then text+=${_armin_sfx[-S]}
     elif [[ -n $_armin_isfile && -d ${dir:+$dir/}$word ]]; then text+=/ show+=/
     else text+=' '; fi
-    _armin_cshow+=( "${show//$'\n'/ }" )
+    show=${show//$'\n'/ }
+    _armin_cshow+=( "$show" )
+    # zsh writes a description after " -- ".
+    rest=${show#*' -- '}
+    _armin_cdesc+=( $(( ${#rest} < ${#show} ? ${#show} - ${#rest} - 4 : -1 )) )
     mark=''
     [[ -n $typed && $show == "$typed"* ]] && mark=0-${#typed}
     _armin_cmark+=( "$mark" )
@@ -211,13 +225,13 @@ _armin_complete() {
   # Defined only now: a completion widget loads zsh/complete, which turns off
   # the plain completion zsh falls back to without compinit.
   (( ${+widgets[_armin_capture]} )) || zle -C _armin_capture complete-word _armin_capture_widget
-  _armin_cshow=() _armin_cmark=() _armin_ctext=() _armin_ccut=() _armin_cquote=''
+  _armin_cshow=() _armin_cmark=() _armin_ctext=() _armin_ccut=() _armin_cdesc=() _armin_cquote=''
   zle _armin_capture
   # In an open quote, zsh's own Tab closes it.
   [[ -n $_armin_cquote ]] && return 1
   (( ${#_armin_cshow} )) || return 1
 
-  local -a items marks lines texts
+  local -a items marks lines texts descs
   local -A seen
   local line
   local -i i
@@ -226,6 +240,7 @@ _armin_complete() {
     (( ${+seen[$line]} )) && continue
     seen[$line]=1
     items+=( "$_armin_cshow[i]" ) marks+=( "$_armin_cmark[i]" ) lines+=( "$line" )
+    descs+=( $_armin_cdesc[i] )
     texts+=( "${${_armin_ctext[i]% }//$'\n'/ }" )
   done
   _armin_typed=$BUFFER
@@ -233,7 +248,7 @@ _armin_complete() {
     _armin_set_buffer "$lines[1]"
     return 0
   fi
-  _armin_items=() _armin_marks=() _armin_lines=()
+  _armin_items=() _armin_marks=() _armin_lines=() _armin_descs=()
   # The ones you've used with this command first; a list too long to send
   # stays in zsh's order.
   local -a order
@@ -246,8 +261,11 @@ _armin_complete() {
   fi
   for i in $order; do
     _armin_items+=( "$items[i+1]" ) _armin_marks+=( "$marks[i+1]" ) _armin_lines+=( "$lines[i+1]" )
+    _armin_descs+=( $descs[i+1] )
   done
   _armin_sel=0 _armin_top=1
+  # Under the word being completed.
+  _armin_col=$(( ${#BUFFER} - _armin_ccut[1] ))
   _armin_move 1
 }
 
@@ -278,25 +296,58 @@ _armin_render() {
   done
   (( width > COLUMNS - 4 )) && width=$(( COLUMNS - 4 ))
 
+  # Line up under the word: past the prompt and the buffer before it, and
+  # left of the pane's edge.
+  local -i indent=$(( (_armin_prompt + _armin_col) % COLUMNS ))
+  (( indent > COLUMNS - width - 2 )) && indent=$(( COLUMNS - width - 2 ))
+  (( indent < 0 )) && indent=0
+  local pad=${(l:indent:)}
+
   local text='' range
-  local -i base=${#BUFFER} off
-  local -a hl
+  local -i base=${#BUFFER} off d
+  local -a hl parts seg
+  local part
 
   for (( i = 1; i <= rows; i++ )); do
     at=$(( _armin_top + i - 1 ))
     item=${shown[i]}
     (( ${#item} > width )) && item="${item[1,width-1]}…"
-    text+=$'\n'
+    text+=$'\n'$pad
     off=$(( base + ${#text} ))
     text+=" ${(r:width:)item} "
-    (( at == _armin_sel )) && hl+=( "$off $(( off + width + 2 )) $ARMIN_HL_SELECTED,memo=armin" )
+    # The row's styled stretches, in order and apart: where one range ends
+    # inside another, zsh resets every attribute and never restores the outer
+    # one. So the selected row is cut into pieces, each with its whole style.
+    parts=()
     for range in ${(s:,:)_armin_marks[at]}; do
       s=${range%-*} e=${range#*-}
       (( e > width )) && e=width
-      (( s < e )) && hl+=( "$(( off + 1 + s )) $(( off + 1 + e )) $ARMIN_HL_MATCH,memo=armin" )
+      (( s < e )) && parts+=( "$(( 1 + s )) $(( 1 + e )) $ARMIN_HL_MATCH" )
     done
+    d=${_armin_descs[at]:--1}
+    if (( d >= 0 && d < width )); then
+      # A description starts after the last matched letter.
+      e=${${parts[-1]:-0 0}[(w)2]}
+      (( d + 1 < e )) && d=$(( e - 1 ))
+      parts+=( "$(( 1 + d )) $(( 1 + width )) $ARMIN_HL_DESCRIPTION" )
+    fi
+    if (( at == _armin_sel )); then
+      s=0
+      for part in $parts; do
+        seg=( ${=part} )
+        (( s < seg[1] )) && hl+=( "$(( off + s )) $(( off + seg[1] )) $ARMIN_HL_SELECTED,memo=armin" )
+        hl+=( "$(( off + seg[1] )) $(( off + seg[2] )) $ARMIN_HL_SELECTED,$seg[3],memo=armin" )
+        s=$seg[2]
+      done
+      (( s < width + 2 )) && hl+=( "$(( off + s )) $(( off + width + 2 )) $ARMIN_HL_SELECTED,memo=armin" )
+    else
+      for part in $parts; do
+        seg=( ${=part} )
+        hl+=( "$(( off + seg[1] )) $(( off + seg[2] )) $seg[3],memo=armin" )
+      done
+    fi
   done
-  (( total > rows )) && text+=$'\n'" ${(l:${#total}:)$(( _armin_sel ? _armin_sel : _armin_top ))}/$total"
+  (( total > rows )) && text+=$'\n'$pad" ${(l:${#total}:)$(( _armin_sel ? _armin_sel : _armin_top ))}/$total"
 
   POSTDISPLAY=$text
   region_highlight+=( $hl )
@@ -314,6 +365,26 @@ _armin_pre_redraw() {
 _armin_line_init() {
   _armin_seen=''
   _armin_close
+  _armin_measure_prompt
+}
+
+# The width of the prompt's last line, where the buffer starts. A prompt that
+# runs a program to draw itself, like starship's, isn't run again to measure
+# it: ARMIN_PROMPT_WIDTH says, or armin guesses 2, as for "❯ ".
+_armin_measure_prompt() {
+  if [[ -n $ARMIN_PROMPT_WIDTH ]]; then
+    _armin_prompt=$ARMIN_PROMPT_WIDTH
+    return
+  fi
+  local p=$PS1
+  if [[ -o prompt_subst && $p == *[\$\`]* ]]; then
+    _armin_prompt=2
+    return
+  fi
+  setopt local_options extended_glob
+  p=${${(%)p}##*$'\n'}
+  p=${p//$'\e'\[[0-9;?]#[a-zA-Z]/}
+  _armin_prompt=${(m)#p}
 }
 
 # Clear before zsh draws the finished line, or the menu stays in scrollback.

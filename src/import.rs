@@ -61,6 +61,13 @@ pub fn parse_zsh(bytes: &[u8], fallback_end: i64) -> Vec<Event> {
         .collect()
 }
 
+/// Whether zsh wrote times into the file: only with `setopt extended_history`.
+pub fn has_times(bytes: &[u8]) -> bool {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .any(|line| split_extended(line).0.is_some())
+}
+
 /// `: 1700000000:3;git status` → (time, duration) and the command.
 fn split_extended(line: &str) -> (Option<(i64, u64)>, String) {
     let parsed = line.strip_prefix(": ").and_then(|rest| {

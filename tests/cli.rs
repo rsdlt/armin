@@ -114,6 +114,14 @@ fn imports_once() {
         .map(|s| s.1)
         .collect();
     assert_eq!(found, ["make lint", "make test"]);
+    assert!(!stdout(&out).contains("no times"));
+
+    // Without extended_history, zsh writes no times: armin says so.
+    std::fs::write(data.path().join("plain"), "ls\ncd src\n").unwrap();
+    let plain = data.path().join("plain");
+    let out = armin(data.path(), &["import", plain.to_str().unwrap()]);
+    assert!(stdout(&out).contains("has no times"), "{}", stdout(&out));
+    assert!(stdout(&out).contains("setopt extended_history"));
 }
 
 #[test]

@@ -7,6 +7,23 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `ARMIN_HL_DESCRIPTION` colors a completion's description, grey by default, so the
+  candidates stand out from it.
+- `armin import` says when your zsh history has no times, and how to have zsh keep them.
+
+### Changed
+
+- The menu lines up under the word you're on, past the prompt, instead of at the left edge.
+  `ARMIN_PROMPT_WIDTH` sets the prompt's width when armin can't measure it.
+
+### Fixed
+
+- The selected row lost its highlight past the first matched letter: where one highlight
+  ends inside another, zsh resets every attribute. The row is now drawn in pieces that don't
+  overlap.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added

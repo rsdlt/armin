@@ -137,8 +137,14 @@ Set these before the `eval` line:
 | `ARMIN_MAX_ROWS` | `8` | how many suggestions the menu shows |
 | `ARMIN_HL_MATCH` | `bold` | the letters that match what you typed |
 | `ARMIN_HL_SELECTED` | `standout` | the selected row |
+| `ARMIN_HL_DESCRIPTION` | `fg=8` | a completion's description |
+| `ARMIN_PROMPT_WIDTH` | measured | your prompt's last line, so the menu lines up under the word |
 
 Colors use zsh's highlight syntax, like `fg=blue,bold`, and default to your terminal's palette.
+
+armin measures a plain prompt itself. A prompt a program draws, like starship's, it doesn't run
+again just to measure: it takes 2 columns, as for `❯ `, unless `ARMIN_PROMPT_WIDTH` says
+otherwise.
 
 ## Field report
 

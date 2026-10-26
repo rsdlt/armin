@@ -393,5 +393,13 @@ fn import(file: Option<PathBuf>) -> Result<()> {
         file.display(),
         log.display()
     );
+    if !fresh.is_empty() && !import::has_times(&bytes) {
+        println!(
+            "armin: {} has no times, so these count as run just now, in no directory.\n\
+             armin records times and directories itself from here on. For zsh to keep\n\
+             them too, add `setopt extended_history` to ~/.zshrc.",
+            file.display()
+        );
+    }
     Ok(())
 }
