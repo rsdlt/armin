@@ -6,7 +6,8 @@
 #
 # Keys while the menu is open: Tab / Shift-Tab and Ctrl-N / Ctrl-P move, and
 # the selection is put on the line as you move. Enter runs the line, Esc puts
-# back what you typed and closes. Tab on an empty line opens the menu with what
+# back what you typed and closes. With the menu closed, Tab opens it with zsh's
+# own completions for the word you're on, or, on an empty line, with what
 # usually comes next. With the menu closed, every other key does what it did
 # before.
 
@@ -20,9 +21,11 @@ typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
 typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
 typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
 
-typeset -ga _armin_items      # commands the open menu shows
+typeset -ga _armin_items      # what the open menu shows
 typeset -ga _armin_marks      # per item: matched ranges, "start-end,..."
+typeset -ga _armin_lines      # per item: the line that picking it leaves
 typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
+typeset -gi _armin_top=1      # the item on the menu's first row
 typeset -g  _armin_typed=''   # the buffer the menu was computed for
 typeset -g  _armin_seen=''    # buffer and cursor the menu was computed for
 typeset -gi _armin_open=0
@@ -67,8 +70,10 @@ _armin_clear_display() {
 _armin_close() {
   _armin_open=0
   _armin_sel=0
+  _armin_top=1
   _armin_items=()
   _armin_marks=()
+  _armin_lines=()
   _armin_clear_display
 }
 
@@ -77,7 +82,9 @@ _armin_close() {
 _armin_compute() {
   _armin_items=()
   _armin_marks=()
+  _armin_lines=()
   _armin_sel=0
+  _armin_top=1
   _armin_typed=$BUFFER
   [[ -z $BUFFER || $BUFFER == *$'\n'* ]] && return
   (( CURSOR == ${#BUFFER} )) || return
@@ -88,7 +95,9 @@ _armin_compute() {
 _armin_predict() {
   _armin_items=()
   _armin_marks=()
+  _armin_lines=()
   _armin_sel=0
+  _armin_top=1
   _armin_typed=$BUFFER
   _armin_fetch next "$_armin_previous"
 }
@@ -114,6 +123,132 @@ _armin_fetch() {
     _armin_marks+=( "${item%%$'\t'*}" )
     _armin_items+=( "${item#*$'\t'}" )
   done
+  _armin_lines=( "${_armin_items[@]}" )
+}
+
+# ── zsh's completions ───────────────────────────────────────────────────────
+
+# What a capture found, per match: the row to show, its matched ranges, the
+# text that replaces the word, and how many characters of the word that is.
+typeset -ga _armin_cshow _armin_cmark _armin_ctext _armin_ccut
+typeset -g  _armin_cquote=''
+
+# Stands in for compadd while armin captures: lets zsh decide which matches
+# fit, keeps them, and adds none. Locals carry armin's prefix, since -d names
+# an array of the caller's.
+_armin_compadd() {
+  local -A _armin_apre _armin_hpre _armin_dscrs _armin_oad _armin_sfx _armin_wdir
+  local -a _armin_isfile _armin_noquote _armin_opts
+  zparseopts -E -a _armin_opts P:=_armin_apre p:=_armin_hpre d:=_armin_dscrs \
+    S:=_armin_sfx W:=_armin_wdir O:=_armin_oad A:=_armin_oad D:=_armin_oad \
+    f=_armin_isfile Q=_armin_noquote i: s: I: x: r: R: F: M+: E: q e n U C X+: J: V: a l k o 1 2
+  # Asked only to filter, not to add: compadd's own job.
+  if (( $#_armin_oad )); then builtin compadd "$@"; return; fi
+  local -a _armin_hits _armin_dscr
+  (( $#_armin_dscrs == 1 )) && _armin_dscr=( "${(@P)${(v)_armin_dscrs}}" )
+  builtin compadd -A _armin_hits -D _armin_dscr "$@"
+  local ret=$?
+  (( $#_armin_hits )) || return $ret
+  local hidden=${(v)_armin_hpre} word text show mark dir=${(v)_armin_wdir}
+  local typed=${PREFIX#"$hidden"}
+  local -i i
+  [[ -z $dir && -n $_armin_isfile ]] && dir=${(Qe)~${:-$IPREFIX$hidden}}
+  for (( i = 1; i <= $#_armin_hits; i++ )); do
+    word=$_armin_hits[i]
+    # With -Q the match comes quoted already, as file names with spaces do.
+    if (( $#_armin_noquote )); then text=$word word=${(Q)word}; else text=${(q)word}; fi
+    show=${_armin_dscr[i]:-$word}
+    text=$hidden${(v)_armin_apre}$text
+    # What zsh would put after it: the suffix asked for, / after a folder,
+    # or a space before the next word.
+    if (( ${+_armin_sfx[-S]} )); then text+=${_armin_sfx[-S]}
+    elif [[ -n $_armin_isfile && -d ${dir:+$dir/}$word ]]; then text+=/ show+=/
+    else text+=' '; fi
+    _armin_cshow+=( "${show//$'\n'/ }" )
+    mark=''
+    [[ -n $typed && $show == "$typed"* ]] && mark=0-${#typed}
+    _armin_cmark+=( "$mark" )
+    _armin_ctext+=( "$text" )
+    _armin_ccut+=( ${#PREFIX} )
+  done
+  return 0
+}
+
+# The completion widget: zsh's whole completion run, with compadd swapped.
+_armin_capture_widget() {
+  # Grouped, zsh lists descriptions apart from their matches; a row per match
+  # needs each to carry its own.
+  local grouped
+  zstyle -s ':completion:*' list-grouped grouped
+  zstyle ':completion:*' list-grouped false
+  functions[compadd]=$functions[_armin_compadd]
+  {
+    _main_complete 2>/dev/null
+  } always {
+    unfunction compadd
+    if [[ -n $grouped ]]; then zstyle ':completion:*' list-grouped $grouped
+    else zstyle -d ':completion:*' list-grouped; fi
+  }
+  _armin_cquote=$compstate[quote]
+  compstate[insert]=''
+  compstate[list]=''
+}
+
+# Says once per shell that zsh's completion system isn't loaded.
+typeset -gi _armin_hinted=0
+_armin_hint() {
+  (( _armin_hinted )) && return
+  _armin_hinted=1
+  zle -M "armin: for zsh's completions in the menu, add  autoload -Uz compinit && compinit  to ~/.zshrc"
+}
+
+# Opens the menu with zsh's completions for the word before the cursor; fails
+# when there are none, or zsh's own Tab knows better.
+_armin_complete() {
+  [[ $BUFFER == *$'\n'* ]] && return 1
+  (( CURSOR == ${#BUFFER} )) || return 1
+  (( ${+functions[_main_complete]} )) || { _armin_hint; return 1 }
+  # Defined only now: a completion widget loads zsh/complete, which turns off
+  # the plain completion zsh falls back to without compinit.
+  (( ${+widgets[_armin_capture]} )) || zle -C _armin_capture complete-word _armin_capture_widget
+  _armin_cshow=() _armin_cmark=() _armin_ctext=() _armin_ccut=() _armin_cquote=''
+  zle _armin_capture
+  # In an open quote, zsh's own Tab closes it.
+  [[ -n $_armin_cquote ]] && return 1
+  (( ${#_armin_cshow} )) || return 1
+
+  local -a items marks lines texts
+  local -A seen
+  local line
+  local -i i
+  for (( i = 1; i <= ${#_armin_cshow}; i++ )); do
+    line=${BUFFER[1,${#BUFFER}-_armin_ccut[i]]}$_armin_ctext[i]
+    (( ${+seen[$line]} )) && continue
+    seen[$line]=1
+    items+=( "$_armin_cshow[i]" ) marks+=( "$_armin_cmark[i]" ) lines+=( "$line" )
+    texts+=( "${${_armin_ctext[i]% }//$'\n'/ }" )
+  done
+  _armin_typed=$BUFFER
+  if (( ${#lines} == 1 )); then
+    _armin_set_buffer "$lines[1]"
+    return 0
+  fi
+  _armin_items=() _armin_marks=() _armin_lines=()
+  # The ones you've used with this command first; a list too long to send
+  # stays in zsh's order.
+  local -a order
+  if (( ${#texts} <= 1000 )) &&
+     _armin_ask order "${BUFFER[1,${#BUFFER}-_armin_ccut[1]]}" "${(pj:\n:)texts}"; then
+    order=( ${(f)_armin_reply} )
+  fi
+  if (( ${#order} != ${#lines} )); then
+    order=( {0..$(( ${#lines} - 1 ))} )
+  fi
+  for i in $order; do
+    _armin_items+=( "$items[i+1]" ) _armin_marks+=( "$marks[i+1]" ) _armin_lines+=( "$lines[i+1]" )
+  done
+  _armin_sel=0 _armin_top=1
+  _armin_move 1
 }
 
 _armin_render() {
@@ -121,15 +256,22 @@ _armin_render() {
   (( ${#_armin_items} )) || { _armin_open=0; return }
   _armin_open=1
 
-  # Leave room for the prompt and buffer lines, so the menu never needs more
-  # height than the pane has.
-  local -i rows=${#_armin_items}
-  (( rows > LINES - 3 )) && rows=$(( LINES - 3 ))
+  # Leave room for the prompt and buffer lines, and for a count when there
+  # are more items than rows, so the menu never needs more height than the
+  # pane has.
+  local -i total=${#_armin_items} rows=${#_armin_items}
+  (( rows > ARMIN_MAX_ROWS )) && rows=ARMIN_MAX_ROWS
+  (( rows > LINES - 4 )) && rows=$(( LINES - 4 ))
   (( rows < 1 )) && { _armin_open=0; return }
+  # Scroll so the selection stays in view.
+  (( _armin_sel && _armin_sel < _armin_top )) && _armin_top=_armin_sel
+  (( _armin_sel >= _armin_top + rows )) && _armin_top=$(( _armin_sel - rows + 1 ))
+  (( _armin_top > total - rows + 1 )) && _armin_top=$(( total - rows + 1 ))
+  (( _armin_top < 1 )) && _armin_top=1
 
   # A command spanning lines shows on one row, each newline as ↵.
-  local -a shown=( "${(@)${(@)_armin_items[1,rows]//$'\n'/↵}//$'\t'/ }" )
-  local -i width=0 i s e
+  local -a shown=( "${(@)${(@)_armin_items[_armin_top,_armin_top+rows-1]//$'\n'/↵}//$'\t'/ }" )
+  local -i width=0 i s e at
   local item
   for item in $shown; do
     (( ${#item} > width )) && width=${#item}
@@ -141,18 +283,20 @@ _armin_render() {
   local -a hl
 
   for (( i = 1; i <= rows; i++ )); do
+    at=$(( _armin_top + i - 1 ))
     item=${shown[i]}
     (( ${#item} > width )) && item="${item[1,width-1]}…"
     text+=$'\n'
     off=$(( base + ${#text} ))
     text+=" ${(r:width:)item} "
-    (( i == _armin_sel )) && hl+=( "$off $(( off + width + 2 )) $ARMIN_HL_SELECTED,memo=armin" )
-    for range in ${(s:,:)_armin_marks[i]}; do
+    (( at == _armin_sel )) && hl+=( "$off $(( off + width + 2 )) $ARMIN_HL_SELECTED,memo=armin" )
+    for range in ${(s:,:)_armin_marks[at]}; do
       s=${range%-*} e=${range#*-}
       (( e > width )) && e=width
       (( s < e )) && hl+=( "$(( off + 1 + s )) $(( off + 1 + e )) $ARMIN_HL_MATCH,memo=armin" )
     done
   done
+  (( total > rows )) && text+=$'\n'" ${(l:${#total}:)$(( _armin_sel ? _armin_sel : _armin_top ))}/$total"
 
   POSTDISPLAY=$text
   region_highlight+=( $hl )
@@ -189,7 +333,7 @@ _armin_set_buffer() {
 _armin_move() {
   local -i n=${#_armin_items}
   _armin_sel=$(( (_armin_sel - 1 + $1 + n) % n + 1 ))
-  _armin_set_buffer "${_armin_items[_armin_sel]}"
+  _armin_set_buffer "${_armin_lines[_armin_sel]}"
   _armin_render
 }
 
@@ -211,17 +355,21 @@ _armin_or_fallback() {
   elif [[ -n ${_armin_fallback[$name]} ]]; then zle "${_armin_fallback[$name]}"; fi
 }
 
-# Tab on an empty line opens the menu of what usually comes next, with the
-# first row on the line. With nothing to offer, Tab does what it did before.
+# Tab with the menu closed opens it, with the first row on the line: zsh's
+# completions for the word you're on, or, on an empty line, what usually comes
+# next. With nothing to offer, Tab does what it did before.
 _armin_next() {
-  if (( ! _armin_open )) && [[ -z $BUFFER ]]; then
-    _armin_predict
-    if (( ${#_armin_items} )); then
-      _armin_move 1
-      return
-    fi
+  if (( _armin_open )); then
+    _armin_move 1
+    return
   fi
-  _armin_or_fallback next _armin_move 1
+  if [[ -z $BUFFER ]]; then
+    _armin_predict
+    (( ${#_armin_items} )) && { _armin_move 1; return }
+  elif _armin_complete; then
+    return
+  fi
+  [[ -n ${_armin_fallback[next]} ]] && zle "${_armin_fallback[next]}"
 }
 _armin_prev()   { _armin_or_fallback prev   _armin_move -1 }
 _armin_down()   { _armin_or_fallback down   _armin_move 1 }

@@ -54,14 +54,30 @@ eval "$(armin init zsh)"
 armin import    # reads ~/.zsh_history; run it once
 ```
 
+For zsh's own completions in the menu (flags, subcommands, files, git branches), load zsh's
+completion system too, if your `~/.zshrc` doesn't already:
+
+```sh
+autoload -Uz compinit && compinit
+```
+
+If zsh then warns about insecure directories, Homebrew's are group-writable; `compaudit |
+xargs chmod g-w` fixes them. Until they're fixed, `compinit -i` skips them, and with them
+the completions Homebrew installed.
+
 armin draws where zsh-autosuggestions does, so remove that plugin. zsh-syntax-highlighting
-works alongside armin.
+works alongside armin. fzf-tab does what armin does on `Tab`, so use one of the two.
 
 ## Orders
 
-Start typing. The menu opens after the first character and follows every keystroke. Or, on
-an empty line, press `Tab`: the menu opens with what you usually run next, its first row
-already on the line.
+Start typing. The menu opens after the first character and follows every keystroke.
+
+With the menu closed, press `Tab`. On an empty line, the menu opens with what you usually run
+next. On a word, it opens with zsh's own completions for it: flags, subcommands, files, git
+branches, whatever the command's completion knows, with descriptions. Either way the first
+row is already on the line. A completion replaces only the word you're on, and the ones
+you've used with this command before come first. To reach the completions while the history
+menu is open, `Esc` and then `Tab`.
 
 | Key | Action |
 |---|---|
@@ -73,9 +89,9 @@ already on the line.
 You see the whole command on the line before `Enter` runs it. Keep typing instead, and you
 edit the command you picked.
 
-With the menu closed, every key does what it did before: `Tab` still completes files and
-flags, and in vi mode `Esc` still enters command mode. On an empty line with nothing to
-predict, `Tab` does what it did before too.
+With the menu closed, every other key does what it did before: in vi mode `Esc` still enters
+command mode. When armin has nothing to offer, or you're inside an open quote, `Tab` does
+what it did before too.
 
 ## Strategy
 
@@ -86,6 +102,10 @@ with "command not found" is dropped.
 
 Commands that start with what you typed come first. Below them, fuzzy matches fill in, so
 `gco` finds `git checkout`, with the matched letters in bold.
+
+zsh's completions keep zsh's order, except that the ones past runs of the same command used
+come first, most used first: `git switch <Tab>` lists the branches you switch to. A folder
+counts the files you used in it.
 
 On an empty line there's nothing to match, so armin predicts. Each past time a command ran
 right after the one you just ran, in the same shell, counts on top of its score: after
@@ -117,12 +137,12 @@ Colors use zsh's highlight syntax, like `fg=blue,bold`, and default to your term
 
 - **Swift.** Ranking takes under a tenth of a millisecond per keystroke, 99 times in 100, on a
   history of a thousand commands (`armin bench` measures yours).
-- **Small.** About 2,000 lines of Rust and zsh, tests included, and two dependencies.
+- **Small.** About 2,700 lines of Rust and zsh, tests included, and two dependencies.
 - **Native.** armin draws through zsh's own line editor, not a window over your terminal, so
   it works the same in tmux, zellij, herdr, screen and over ssh.
 
-armin is young. Coming up: zsh's own completions in the menu, so flags, files and git
-branches show up in it too.
+armin is young. Coming up: a panel with the selected command's details, and colors you can
+set in a config file.
 
 ## License
 

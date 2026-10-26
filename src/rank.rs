@@ -6,6 +6,9 @@
 //! it. Commands that start with what you typed always come first; fuzzy
 //! matches fill in below them.
 //!
+//! zsh's own completions for a word come in zsh's order; `order` puts first
+//! the ones you've used with the same command before.
+//!
 //! On an empty line there's nothing typed to match, so armin predicts: what
 //! followed the previous command in the past counts on top of the score, so
 //! after `git add` comes `git commit`.
@@ -234,6 +237,59 @@ impl Index {
             .collect()
     }
 
+    /// The order to show zsh's `candidates` for the word after `line`: the
+    /// ones past runs of the same command used first, most used first, then
+    /// the rest as zsh gave them. A candidate ending in `/` or `=` counts a
+    /// word that starts with it, as `src/` counts `src/main.rs`.
+    pub fn order(&self, line: &str, candidates: &[&str], now: i64) -> Vec<usize> {
+        // The words before the one being completed.
+        let mut context: Vec<&str> = line.split_whitespace().collect();
+        if !line.ends_with(char::is_whitespace) {
+            context.pop();
+        }
+        let mut scores = vec![0.0; candidates.len()];
+        if let Some((&program, _)) = context.split_first() {
+            let mut by_word: HashMap<&str, Vec<usize>> = HashMap::new();
+            for (i, c) in candidates.iter().enumerate() {
+                by_word.entry(c.trim_end()).or_default().push(i);
+            }
+            for c in &self.commands {
+                let mut words = c.text.split_whitespace();
+                if words.next() != Some(program) {
+                    continue;
+                }
+                let mut weight: f64 = c.runs.iter().map(|r| r.weight * decay(now, r.time)).sum();
+                // Runs of the very same subcommand say more than the program's.
+                if c.text
+                    .split_whitespace()
+                    .take(context.len())
+                    .eq(context.iter().copied())
+                {
+                    weight *= 2.0;
+                }
+                let mut used = vec![false; candidates.len()];
+                for word in words {
+                    let prefixes = word
+                        .match_indices(['/', '='])
+                        .map(|(at, _)| &word[..=at])
+                        .chain([word]);
+                    for key in prefixes {
+                        for &i in by_word.get(key).into_iter().flatten() {
+                            if !used[i] {
+                                used[i] = true;
+                                scores[i] += weight;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let mut order: Vec<usize> = (0..candidates.len()).collect();
+        // Stable, so unused candidates keep zsh's order.
+        order.sort_by(|&a, &b| scores[b].total_cmp(&scores[a]));
+        order
+    }
+
     /// The latest command that starts with `typed`, typos and all: what
     /// zsh-autosuggestions would offer.
     pub fn most_recent(&self, typed: &str) -> Option<&str> {
@@ -374,6 +430,29 @@ mod tests {
         let events = [ok("vim notes", 1), other, ok("git diff", 1)];
         assert_eq!(predict(&events, Some("vim notes"))[0], "git diff");
         assert_eq!(Index::from_events(&events).last_in("t"), Some("cargo test"));
+    }
+
+    #[test]
+    fn orders_completions_by_use() {
+        let events = [
+            ok("git switch main", 1),
+            ok("git switch fix-two", 1),
+            ok("git switch fix-two", 2),
+            ok("git log fix-one", 1),
+            ok("cargo test src/main.rs", 1),
+        ];
+        let index = Index::from_events(&events);
+        let branches = ["feature", "fix-one ", "fix-two ", "main "];
+        // The same subcommand counts double: fix-two, main, then fix-one
+        // from git log, then the unused one.
+        assert_eq!(index.order("git switch f", &branches, NOW), [2, 3, 1, 0]);
+        assert_eq!(index.order("git switch ", &branches, NOW), [2, 3, 1, 0]);
+        // A folder counts the files used in it.
+        assert_eq!(index.order("cargo test s", &["docs/", "src/"], NOW), [1, 0]);
+        // Another program's runs don't count, and nothing typed keeps
+        // zsh's order.
+        assert_eq!(index.order("tig ", &branches, NOW), [0, 1, 2, 3]);
+        assert_eq!(index.order("git", &branches, NOW), [0, 1, 2, 3]);
     }
 
     fn top(events: &[Event], typed: &str, cwd: &str) -> Vec<String> {

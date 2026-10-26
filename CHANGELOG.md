@@ -7,6 +7,16 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Tab` with the menu closed opens it with zsh's own completions for the word you're on:
+  flags, subcommands, files, git branches, with their descriptions. The first row goes on
+  the line, `Tab` moves on, and a pick replaces only that word, with the `/` or space zsh
+  would add. The ones you've used with the same command before come first. Long lists
+  scroll, with a count under the menu. It needs zsh's completion system
+  (`autoload -Uz compinit && compinit`); without it, armin says so once and `Tab` does what
+  it did before.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

@@ -11,7 +11,9 @@
 //! command's arguments. The reply starts with `ok`, NUL, and for `suggest` (a
 //! limit, a directory and what's typed) and `next` (a limit, a directory and
 //! the command that ran last) the suggestions follow in the same form `armin
-//! suggest` prints. A client newer
+//! suggest` prints. For `order` (the line before the word being completed,
+//! and zsh's candidates for it, one per line) the indices of the candidates
+//! follow, best first, one per line. A client newer
 //! than the daemon means armin was upgraded: the daemon answers `restart` and
 //! exits, and the shell starts the new one.
 
@@ -212,6 +214,20 @@ fn serve(mut stream: UnixStream, state: &Mutex<State>) -> Result<Flow> {
             }
             stream.write_all(out.as_bytes())?;
         }
+        ["order", line, candidates] => {
+            let candidates: Vec<&str> = candidates.split('\n').collect();
+            let order = {
+                let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                state.refresh()?;
+                state.index.order(line, &candidates, history::now())
+            };
+            let mut out = String::from("ok\0");
+            for i in order {
+                out.push_str(&i.to_string());
+                out.push('\n');
+            }
+            stream.write_all(out.as_bytes())?;
+        }
         _ => stream.write_all(b"error\0")?,
     }
     Ok(Flow::Continue)
@@ -221,6 +237,7 @@ fn serve(mut stream: UnixStream, state: &Mutex<State>) -> Result<Flow> {
 fn arity(command: &str) -> usize {
     match command {
         "suggest" | "next" => 3,
+        "order" => 2,
         _ => 0,
     }
 }
@@ -293,6 +310,8 @@ mod tests {
     #[test]
     fn arguments_per_command() {
         assert_eq!(arity("suggest"), 3);
+        assert_eq!(arity("next"), 3);
+        assert_eq!(arity("order"), 2);
         assert_eq!(arity("ping"), 0);
     }
 }
