@@ -7,21 +7,23 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
 ### Added
 
-- A logo, and a demo GIF in the README, recorded with vhs from `docs/demo.sh`.
-- `ARMIN_HL_DESCRIPTION` colors a completion's description, grey by default, so the
-  candidates stand out from it.
-- `armin import` says when your zsh history has no times, and how to have zsh keep them.
+- A panel beside the menu tells you about the selected row: for a command from your history,
+  how often and when it last ran, where, its last exit code and how long it takes; for a row
+  the menu cuts short, the whole command or description. With it on, the menu takes at most
+  60% of the pane. It hides where the pane is too narrow, and `ARMIN_PANEL=0` turns it off.
 - A config file, `~/.config/armin/config.toml`, read when the shell starts: the menu's rows,
   the panel, the prompt's width, the colors one by one, and three themes for them all at once
   (`default`, `survey-corps`, `colossal`). `armin config` prints every setting at its default.
   A variable set before the `eval` line still wins, and a mistake in the file is reported
   with its line while the shell starts with the defaults.
-- A panel beside the menu tells you about the selected row: for a command from your history,
-  how often and when it last ran, where, its last exit code and how long it takes; for a row
-  the menu cuts short, the whole command or description. With it on, the menu takes at most
-  60% of the pane. It hides where the pane is too narrow, and `ARMIN_PANEL=0` turns it off.
+- `ARMIN_HL_DESCRIPTION` colors a completion's description, grey by default, so the
+  candidates stand out from it.
+- `armin import` says when your zsh history has no times, and how to have zsh keep them.
+- A logo, and a demo GIF in the README, recorded with vhs from `docs/demo.sh`.
 
 ### Changed
 
@@ -36,6 +38,7 @@ All notable changes to armin are documented here. The format follows
 - The selected row lost its highlight past the first matched letter: where one highlight
   ends inside another, zsh resets every attribute. The row is now drawn in pieces that don't
   overlap.
+- A menu as wide as the pane wrapped each row onto a blank line.
 
 ## [0.4.0] - 2026-10-26
 
@@ -104,7 +107,8 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_MAX_ROWS`, `ARMIN_HL_MATCH`, `ARMIN_HL_SELECTED` and `ARMIN_HL_GHOST` set the menu's
   height and colors.
 
-[Unreleased]: https://github.com/rsdlt/armin/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rsdlt/armin/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rsdlt/armin/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rsdlt/armin/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rsdlt/armin/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rsdlt/armin/compare/v0.1.0...v0.2.0
