@@ -519,21 +519,42 @@ _armin_escape() { _armin_or_fallback escape _armin_dismiss }
 
 # Bind in main, the keymap the user types in (emacs, or viins when $EDITOR
 # names vi). A key's old widget becomes its fallback; a prefix key such as Esc
-# in emacs reads back as a quoted string and counts as unbound.
+# in emacs reads back as a quoted string and counts as unbound. Loaded again in
+# the same shell (source ~/.zshrc), a key is armin's already: it keeps the
+# fallback from the first time, or it would fall back to itself, forever.
 _armin_bind() {
   local name=$1 key=$2 w
   w=${${(z)$(bindkey -M main -- $key)}[2]}
   [[ $w == undefined-key || $w == \"* ]] && w=''
+  [[ $w == _armin_* ]] && w=${_armin_fallback[$name]}
+  # A shell an older armin left looping gets zsh's usual widget instead.
+  [[ $w == _armin_* ]] && w=${_armin_usual[$name]}
   _armin_fallback[$name]=$w
   zle -N _armin_$name
   bindkey -M main -- $key _armin_$name
 }
 
+typeset -gA _armin_usual=(
+  next  expand-or-complete
+  down  down-line-or-history
+  up    up-line-or-history
+  prev  ''
+  escape "$([[ $(bindkey -lL main) == *viins* ]] && print vi-cmd-mode)"
+)
 _armin_bind next   '^I'
 _armin_bind prev   '^[[Z'
 _armin_bind down   '^N'
 _armin_bind up     '^P'
 _armin_bind escape '^['
+# armin 0.1.0 had Enter: a shell that loaded it before this one gets Enter's
+# own widget back.
+if [[ ${${(z)$(bindkey -M main -- '^M')}[2]} == _armin_accept ]]; then
+  if [[ -n ${_armin_fallback[accept]} && ${_armin_fallback[accept]} != _armin_* ]]; then
+    bindkey -M main -- '^M' ${_armin_fallback[accept]}
+  else
+    bindkey -M main -- '^M' accept-line
+  fi
+fi
 # Esc only fires after KEYTIMEOUT (default 0.4s) in case it starts a longer
 # sequence such as an arrow key. Shorten it so closing feels instant.
 (( KEYTIMEOUT > 10 )) && KEYTIMEOUT=10
@@ -547,7 +568,13 @@ add-zle-hook-widget line-finish     _armin_line_finish
 # any trap that was already there.
 _armin_interrupt() { _armin_close; zle -R }
 zle -N _armin_interrupt
-(( ${+functions[TRAPINT]} )) && functions -c TRAPINT _armin_prev_trapint
+# Loaded again, the trap is armin's already: keep the one it went on to, unless
+# an older armin made that its own trap too, which only ever called itself.
+if (( ${+functions[TRAPINT]} )) && [[ ${functions[TRAPINT]} != *_armin_interrupt* ]]; then
+  functions -c TRAPINT _armin_prev_trapint
+elif [[ ${functions[_armin_prev_trapint]} == *_armin_interrupt* ]]; then
+  unfunction _armin_prev_trapint
+fi
 TRAPINT() {
   zle && zle _armin_interrupt
   (( ${+functions[_armin_prev_trapint]} )) && { _armin_prev_trapint "$@"; return }

@@ -7,6 +7,14 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Loading armin twice in one shell, as `source ~/.zshrc` does, made `Tab`, `Ctrl-C` and (after
+  0.1.0) `Enter` call themselves until zsh gave up with "job table full or recursion limit
+  exceeded" or "maximum nested function level reached". Each key now keeps the widget it had
+  before armin, however often armin loads, and a shell an older armin left in that state is
+  set right by loading this one.
+
 ## [0.5.0] - 2026-10-26
 
 ### Added
