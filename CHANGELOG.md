@@ -7,6 +7,8 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-26
+
 ### Added
 
 - A daemon keeps your history in memory and answers each keystroke over a socket, so typing
@@ -19,6 +21,7 @@ All notable changes to armin are documented here. The format follows
 
 - `Tab` puts the selected command on the line as you move through the menu, and `Enter` runs
   it: one key fewer per pick. `Esc` puts back what you typed.
+- Building from source needs Rust 1.89.
 
 ### Removed
 
@@ -44,5 +47,6 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_MAX_ROWS`, `ARMIN_HL_MATCH`, `ARMIN_HL_SELECTED` and `ARMIN_HL_GHOST` set the menu's
   height and colors.
 
-[Unreleased]: https://github.com/rsdlt/armin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rsdlt/armin/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rsdlt/armin/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rsdlt/armin/releases/tag/v0.1.0
