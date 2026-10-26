@@ -255,6 +255,7 @@ _armin_complete() {
   done
   _armin_typed=$BUFFER
   if (( ${#lines} == 1 )); then
+    _armin_close
     _armin_set_buffer "$lines[1]"
     return 0
   fi
@@ -494,6 +495,12 @@ _armin_or_fallback() {
 # next. With nothing to offer, Tab does what it did before.
 _armin_next() {
   if (( _armin_open )); then
+    # A history menu of loose matches only says little: the first Tab goes
+    # to zsh's completions instead. C-n still picks those rows.
+    if [[ $_armin_mode == history && -n $BUFFER ]] && (( ! _armin_sel )) &&
+       [[ -z ${(M)_armin_items:#${(b)BUFFER}*} ]] && _armin_complete; then
+      return
+    fi
     _armin_move 1
     return
   fi

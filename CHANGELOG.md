@@ -19,6 +19,9 @@ All notable changes to armin are documented here. The format follows
 
 ### Changed
 
+- When the history menu only has loose matches, `Tab` opens zsh's completions instead of
+  cycling them: some old command almost always loosely matches an argument, so `Tab` rarely
+  reached the completions. `C-n` still picks those rows.
 - The menu lines up under the word you're on, past the prompt, instead of at the left edge.
   `ARMIN_PROMPT_WIDTH` sets the prompt's width when armin can't measure it.
 

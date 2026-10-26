@@ -83,8 +83,11 @@ With the menu closed, press `Tab`. On an empty line, the menu opens with what yo
 next. On a word, it opens with zsh's own completions for it: flags, subcommands, files, git
 branches, whatever the command's completion knows, with descriptions. Either way the first
 row is already on the line. A completion replaces only the word you're on, and the ones
-you've used with this command before come first. To reach the completions while the history
-menu is open, `Esc` and then `Tab`.
+you've used with this command before come first.
+
+When the history menu only has loose matches, nothing that starts with what you typed, `Tab`
+skips it and opens zsh's completions; `C-n` still picks those rows. To reach the completions
+past a history menu that does, `Esc` and then `Tab`.
 
 | Key | Action |
 |---|---|
