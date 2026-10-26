@@ -35,6 +35,7 @@ Keys while the menu is open:
                       (the selected command goes on the line as you move)
   Enter               run the line
   Esc                 put back what you typed and close the menu
+On an empty line, Tab opens the menu with what you usually run next.
 With the menu closed, keys do what they always did: Tab still completes.
 
 History lives in ~/.local/share/armin/history ($ARMIN_DATA_DIR or
@@ -47,7 +48,7 @@ upgraded; `armin daemon stop` stops it, and the next keystroke starts it again.
 
 Called by the shell, not by you:
   armin daemon
-  armin suggest --cwd <dir> [--limit <n>] -- <typed>
+  armin suggest --cwd <dir> [--limit <n>] [--after <command>] -- <typed>
   armin record --time <t> --duration <ms> --exit <code> --session <id> --cwd <dir> -- <command>
 ";
 
@@ -80,7 +81,9 @@ Replays your last n commands (default 2000), typing each one key at a time,
 and counts the keystrokes it takes with armin and with zsh-autosuggestions.
 For each command, armin knows only what ran before it.
 
-  armin: the characters typed, and a Tab per row down the menu.
+  armin: the characters typed, and a Tab per row down the menu. Before the
+         first character, Tab opens what usually comes next, so a command
+         found there costs a Tab per row alone.
   zsh-autosuggestions: the characters typed, and → once its guess is right.
 
 Also prints how long each of armin's answers took.
@@ -97,11 +100,12 @@ itself when armin is upgraded.
 ";
 
 const SUGGEST_HELP: &str = "\
-Usage: armin suggest --cwd <dir> [--limit <n>] -- <typed>
+Usage: armin suggest --cwd <dir> [--limit <n>] [--after <command>] -- <typed>
 
 Called by the shell when the daemon isn't running. Prints up to n suggestions
 (default 8) for what's typed, each as its matched ranges, a tab, the command
-and a NUL.
+and a NUL. With nothing typed, it predicts what comes after the command that
+ran last.
 ";
 
 const RECORD_HELP: &str = "\
@@ -140,6 +144,7 @@ enum Cli {
     Suggest {
         cwd: String,
         limit: usize,
+        after: Option<String>,
         typed: String,
     },
     Record(Event),
@@ -209,6 +214,7 @@ fn parse_command(cmd: &str, rest: &[String]) -> Result<Cli, String> {
             Ok(Cli::Suggest {
                 cwd: flags.take("cwd")?,
                 limit,
+                after: flags.get("after").filter(|a| !a.is_empty()).cloned(),
                 typed,
             })
         }
@@ -289,7 +295,12 @@ fn main() -> ExitCode {
                     println!("armin: no daemon was running");
                 }
             }),
-        Ok(Cli::Suggest { cwd, limit, typed }) => print_suggestions(&cwd, limit, &typed),
+        Ok(Cli::Suggest {
+            cwd,
+            limit,
+            after,
+            typed,
+        }) => print_suggestions(&cwd, limit, after.as_deref(), &typed),
         Ok(Cli::Record(event)) => {
             history::log_path().and_then(|log| history::append(&log, &[event]))
         }
@@ -324,13 +335,15 @@ fn print_init() -> Result<()> {
 }
 
 /// What the daemon would answer, for when it isn't running.
-fn print_suggestions(cwd: &str, limit: usize, typed: &str) -> Result<()> {
-    let events = history::read(&history::log_path()?)?;
+fn print_suggestions(cwd: &str, limit: usize, after: Option<&str>, typed: &str) -> Result<()> {
+    let index = rank::Index::from_events(&history::read(&history::log_path()?)?);
+    let found = if typed.is_empty() {
+        index.predict(after, cwd, now(), limit)
+    } else {
+        index.suggest(typed, cwd, now(), limit)
+    };
     let mut out = String::new();
-    rank::encode(
-        &rank::Index::from_events(&events).suggest(typed, cwd, now(), limit),
-        &mut out,
-    );
+    rank::encode(&found, &mut out);
     io::stdout().lock().write_all(out.as_bytes())?;
     Ok(())
 }

@@ -8,8 +8,10 @@
 //! second one from starting, and the socket sits next to the log.
 //!
 //! A request is fields ending in NUL: the client's version, a command, and the
-//! command's arguments. The reply starts with `ok`, NUL, and for `suggest` the
-//! suggestions follow in the same form `armin suggest` prints. A client newer
+//! command's arguments. The reply starts with `ok`, NUL, and for `suggest` (a
+//! limit, a directory and what's typed) and `next` (a limit, a directory and
+//! the command that ran last) the suggestions follow in the same form `armin
+//! suggest` prints. A client newer
 //! than the daemon means armin was upgraded: the daemon answers `restart` and
 //! exits, and the shell starts the new one.
 
@@ -193,13 +195,19 @@ fn serve(mut stream: UnixStream, state: &Mutex<State>) -> Result<Flow> {
             stream.write_all(b"ok\0")?;
             return Ok(Flow::Exit);
         }
-        ["suggest", limit, cwd, typed] => {
+        [command @ ("suggest" | "next"), limit, cwd, text] => {
             let limit = limit.parse().unwrap_or(8);
             let mut out = String::from("ok\0");
             {
                 let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
                 state.refresh()?;
-                let found = state.index.suggest(typed, cwd, history::now(), limit);
+                let now = history::now();
+                let found = if *command == "next" {
+                    let previous = (!text.is_empty()).then_some(*text);
+                    state.index.predict(previous, cwd, now, limit)
+                } else {
+                    state.index.suggest(text, cwd, now, limit)
+                };
                 rank::encode(&found, &mut out);
             }
             stream.write_all(out.as_bytes())?;
@@ -212,7 +220,7 @@ fn serve(mut stream: UnixStream, state: &Mutex<State>) -> Result<Flow> {
 /// How many arguments follow each command.
 fn arity(command: &str) -> usize {
     match command {
-        "suggest" => 3,
+        "suggest" | "next" => 3,
         _ => 0,
     }
 }

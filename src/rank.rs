@@ -6,6 +6,10 @@
 //! it. Commands that start with what you typed always come first; fuzzy
 //! matches fill in below them.
 //!
+//! On an empty line there's nothing typed to match, so armin predicts: what
+//! followed the previous command in the past counts on top of the score, so
+//! after `git add` comes `git commit`.
+//!
 //! The index keeps each distinct command once, with its runs, so a keystroke
 //! only scores the commands that match it.
 
@@ -18,6 +22,8 @@ use crate::history::Event;
 
 /// How much a run in the current directory counts on top of the run itself.
 const HERE_WEIGHT: f64 = 1.5;
+/// How much a run right after the previous command counts, on an empty line.
+const AFTER_WEIGHT: f64 = 5.0;
 /// Fuzzy matches start at this many typed characters; below it they match
 /// nearly everything.
 const FUZZY_MIN_CHARS: usize = 2;
@@ -40,6 +46,8 @@ pub struct Index {
     commands: Vec<Command>,
     by_text: HashMap<String, usize>,
     dirs: HashMap<String, u32>,
+    /// Per session, the command that ran last.
+    last_in_session: HashMap<String, usize>,
 }
 
 struct Command {
@@ -50,6 +58,13 @@ struct Command {
     /// Runs the shell couldn't start: not found (127) or not executable (126).
     broken: u32,
     last: i64,
+    /// Runs that came right after another command in the same session.
+    after: Vec<After>,
+}
+
+struct After {
+    previous: usize,
+    time: i64,
 }
 
 struct Run {
@@ -77,6 +92,7 @@ impl Index {
                 total: 0,
                 broken: 0,
                 last: i64::MIN,
+                after: Vec::new(),
             });
         }
         let next_dir = self.dirs.len() as u32;
@@ -103,6 +119,64 @@ impl Index {
             weight,
             dir,
         });
+        // A typo that never ran isn't what came before the command it was
+        // retyped as, so only commands that ran make it here.
+        if let Some(&previous) = self.last_in_session.get(&e.session) {
+            c.after.push(After {
+                previous,
+                time: e.time,
+            });
+        }
+        self.last_in_session.insert(e.session.clone(), i);
+    }
+
+    /// The command that ran last in `session`.
+    pub fn last_in(&self, session: &str) -> Option<&str> {
+        self.last_in_session
+            .get(session)
+            .map(|&i| self.commands[i].text.as_str())
+    }
+
+    /// Up to `limit` commands you're likely to run next, best first, for an
+    /// empty line: after `previous`, in `cwd`.
+    pub fn predict(
+        &self,
+        previous: Option<&str>,
+        cwd: &str,
+        now: i64,
+        limit: usize,
+    ) -> Vec<Suggestion> {
+        let here = self.dirs.get(cwd).copied().unwrap_or(NO_DIR);
+        let previous = previous.and_then(|p| self.by_text.get(p)).copied();
+        let mut ranked: Vec<(f64, i64, usize)> = self
+            .commands
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !c.runs.is_empty())
+            .map(|(i, c)| {
+                let after: f64 = c
+                    .after
+                    .iter()
+                    .filter(|a| Some(a.previous) == previous)
+                    .map(|a| decay(now, a.time))
+                    .sum();
+                let score = c.score(here, now) + AFTER_WEIGHT * (1.0 + after).ln();
+                (score, c.last, i)
+            })
+            .collect();
+        ranked.sort_by(|a, b| {
+            b.0.total_cmp(&a.0)
+                .then(b.1.cmp(&a.1))
+                .then_with(|| self.commands[a.2].text.cmp(&self.commands[b.2].text))
+        });
+        ranked
+            .into_iter()
+            .take(limit)
+            .map(|(_, _, i)| Suggestion {
+                command: self.commands[i].text.clone(),
+                matched: Vec::new(),
+            })
+            .collect()
     }
 
     /// Up to `limit` suggestions for `typed`, best first. `now` is Unix seconds.
@@ -175,8 +249,7 @@ impl Command {
     fn score(&self, here: u32, now: i64) -> f64 {
         let (mut frecency, mut local) = (0.0, 0.0);
         for run in &self.runs {
-            let age_days = (now - run.time).max(0) as f64 / 86_400.0;
-            let w = run.weight / (1.0 + age_days / 7.0);
+            let w = run.weight * decay(now, run.time);
             frecency += w;
             if run.dir == here && here != NO_DIR {
                 local += w;
@@ -184,6 +257,12 @@ impl Command {
         }
         (1.0f64 + frecency).ln() + HERE_WEIGHT * (1.0f64 + local).ln()
     }
+}
+
+/// How much a run at `time` still counts: a week ago half, a month ago a fifth.
+fn decay(now: i64, time: i64) -> f64 {
+    let age_days = (now - time).max(0) as f64 / 86_400.0;
+    1.0 / (1.0 + age_days / 7.0)
 }
 
 /// The form the shell reads: per suggestion, its matched ranges as
@@ -247,6 +326,54 @@ mod tests {
         limit: usize,
     ) -> Vec<Suggestion> {
         Index::from_events(events).suggest(typed, cwd, now, limit)
+    }
+
+    fn predict(events: &[Event], previous: Option<&str>) -> Vec<String> {
+        Index::from_events(events)
+            .predict(previous, "/elsewhere", NOW, 10)
+            .into_iter()
+            .map(|s| s.command)
+            .collect()
+    }
+
+    #[test]
+    fn predicts_what_came_next() {
+        let events = [
+            ok("git add .", 3),
+            ok("git commit", 3),
+            ok("git add .", 2),
+            ok("git commit", 2),
+            ok("ls", 1),
+            ok("ls", 1),
+            ok("ls", 1),
+        ];
+        assert_eq!(predict(&events, Some("git add ."))[0], "git commit");
+        // With nothing before it, the most run command leads.
+        assert_eq!(predict(&events, None)[0], "ls");
+        assert_eq!(predict(&events, Some("never ran"))[0], "ls");
+    }
+
+    #[test]
+    fn a_typo_comes_before_nothing() {
+        let events = [
+            ok("make", 3),
+            run("mkae test", 3, "/elsewhere", Some(127)),
+            ok("make test", 3),
+        ];
+        let index = Index::from_events(&events);
+        assert_eq!(index.last_in("s"), Some("make test"));
+        assert!(!predict(&events, None).contains(&"mkae test".to_string()));
+        assert_eq!(predict(&events, Some("make"))[0], "make test");
+        assert!(predict(&events, Some("mkae test")).len() == 2);
+    }
+
+    #[test]
+    fn sessions_keep_their_own_order() {
+        let mut other = ok("cargo test", 1);
+        other.session = "t".into();
+        let events = [ok("vim notes", 1), other, ok("git diff", 1)];
+        assert_eq!(predict(&events, Some("vim notes"))[0], "git diff");
+        assert_eq!(Index::from_events(&events).last_in("t"), Some("cargo test"));
     }
 
     fn top(events: &[Event], typed: &str, cwd: &str) -> Vec<String> {

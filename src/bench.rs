@@ -7,7 +7,8 @@
 //! way could finish it in:
 //!
 //! - armin: the characters typed, and a Tab per row down the menu, which puts
-//!   that row on the line.
+//!   that row on the line. Before the first character, Tab opens the menu of
+//!   what usually comes next, so a command there costs a Tab per row alone.
 //! - zsh-autosuggestions: the characters typed, and → once its guess is right.
 //!
 //! Neither beats typing the whole command, and running it takes an Enter
@@ -26,6 +27,8 @@ pub struct Report {
     pub typed: usize,
     pub autosuggest: usize,
     pub armin: usize,
+    /// Commands armin offered on the empty line, at their cheapest.
+    pub predicted: usize,
     /// How long each of armin's answers took.
     pub latencies: Vec<Duration>,
 }
@@ -40,6 +43,7 @@ pub fn run(events: &[Event], last: usize, rows: usize) -> Report {
         typed: 0,
         autosuggest: 0,
         armin: 0,
+        predicted: 0,
         latencies: Vec::new(),
     };
     for e in &events[split..] {
@@ -67,6 +71,13 @@ pub fn run(events: &[Event], last: usize, rows: usize) -> Report {
         report.autosuggest += auto;
 
         let mut best = len;
+        let start = Instant::now();
+        let menu = index.predict(index.last_in(&e.session), cwd, e.time, rows);
+        report.latencies.push(start.elapsed());
+        if let Some(row) = menu.iter().position(|s| s.command == command) {
+            best = row + 1;
+        }
+        let empty_line = best;
         for (k, &end) in ends.iter().enumerate().map(|(k, end)| (k + 1, end)) {
             // Picking costs at least a Tab on top.
             if k + 1 >= best {
@@ -80,6 +91,9 @@ pub fn run(events: &[Event], last: usize, rows: usize) -> Report {
             }
         }
         report.armin += best;
+        if best == empty_line && best < len {
+            report.predicted += 1;
+        }
 
         index.add(e);
     }
@@ -121,6 +135,13 @@ impl Report {
                 self.typed as f64 / self.replayed as f64,
                 self.autosuggest as f64 / self.replayed as f64,
                 self.armin as f64 / self.replayed as f64,
+            ));
+        }
+        if self.replayed > 0 {
+            out.push_str(&format!(
+                "armin had {} of them ({:.0}%) on an empty line, before the first key.\n",
+                thousands(self.predicted),
+                100.0 * self.predicted as f64 / self.replayed as f64,
             ));
         }
         out.push_str(
@@ -177,7 +198,7 @@ mod tests {
         // recently. Replaying "git status":
         // - zsh-autosuggestions guesses "git stash" until "git stat", 8 keys
         //   in, then → makes 9.
-        // - armin has "git status" on top after "g": 1 + Tab = 2.
+        // - armin has "git status" on top of the empty line's menu: 1 Tab.
         let events = [
             ok("git status", 1),
             ok("git status", 2),
@@ -188,7 +209,8 @@ mod tests {
         assert_eq!((report.total, report.replayed), (4, 1));
         assert_eq!(report.typed, 10);
         assert_eq!(report.autosuggest, 9);
-        assert_eq!(report.armin, 2);
+        assert_eq!(report.armin, 1);
+        assert_eq!(report.predicted, 1);
     }
 
     #[test]
@@ -199,7 +221,7 @@ mod tests {
 
     #[test]
     fn lower_rows_cost_tabs() {
-        // "make lint" is second after "m": 1 + 2 Tabs = 3.
+        // "make lint" is second on the empty line: 2 Tabs.
         let events = [
             ok("make test", 1),
             ok("make test", 2),
@@ -207,7 +229,23 @@ mod tests {
             ok("make lint", 4),
         ];
         let report = run(&events, 1, 8);
-        assert_eq!(report.armin, 3);
+        assert_eq!(report.armin, 2);
+    }
+
+    #[test]
+    fn typing_can_beat_predicting() {
+        // "git push" is last of five on the empty line, 5 Tabs, but on top
+        // after "g": 1 + Tab = 2.
+        let mut events = Vec::new();
+        for (t, command) in ["ls", "make", "cd ..", "vim"].iter().enumerate() {
+            for _ in 0..3 {
+                events.push(ok(command, t as i64));
+            }
+        }
+        events.push(ok("git push", 5));
+        events.push(ok("git push", 6));
+        let report = run(&events, 1, 8);
+        assert_eq!((report.armin, report.predicted), (2, 0));
     }
 
     #[test]

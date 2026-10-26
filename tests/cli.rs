@@ -187,3 +187,18 @@ fn help_and_version() {
         "armin: unknown option '--frob' (see armin import --help)\n"
     );
 }
+
+#[test]
+fn predicts_on_an_empty_line() {
+    let data = TempDir::new().unwrap();
+    for command in ["git add .", "git commit", "ls", "ls", "git add ."] {
+        record(data.path(), "/a", "0", command);
+    }
+    let out = armin(
+        data.path(),
+        &["suggest", "--cwd", "/a", "--after", "git add .", "--", ""],
+    );
+    assert!(out.status.success(), "{}", stderr(&out));
+    let first = stdout(&out).split('\0').next().unwrap().to_owned();
+    assert_eq!(first, "\tgit commit");
+}

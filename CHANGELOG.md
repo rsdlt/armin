@@ -9,6 +9,10 @@ All notable changes to armin are documented here. The format follows
 
 ### Added
 
+- `Tab` on an empty line opens the menu with what you usually run next, its first row on the
+  line. armin ranks by what followed the command you just ran, in the same shell, on top of
+  the usual score. With nothing to predict, `Tab` does what it did before. `armin bench` counts
+  these picks too.
 - `--help` (or `-h`) after any command shows that command's help, as does `armin help
   <command>`. A wrong argument points to the help for its command.
 

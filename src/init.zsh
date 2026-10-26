@@ -6,8 +6,9 @@
 #
 # Keys while the menu is open: Tab / Shift-Tab and Ctrl-N / Ctrl-P move, and
 # the selection is put on the line as you move. Enter runs the line, Esc puts
-# back what you typed and closes. With the menu closed, every key does what it
-# did before.
+# back what you typed and closes. Tab on an empty line opens the menu with what
+# usually comes next. With the menu closed, every other key does what it did
+# before.
 
 zmodload zsh/datetime zsh/parameter zsh/system zsh/net/socket
 autoload -Uz add-zle-hook-widget add-zsh-hook
@@ -25,6 +26,7 @@ typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
 typeset -g  _armin_typed=''   # the buffer the menu was computed for
 typeset -g  _armin_seen=''    # buffer and cursor the menu was computed for
 typeset -gi _armin_open=0
+typeset -g  _armin_previous='' # the command that ran last in this shell
 
 # ── The daemon ──────────────────────────────────────────────────────────────
 
@@ -79,14 +81,33 @@ _armin_compute() {
   _armin_typed=$BUFFER
   [[ -z $BUFFER || $BUFFER == *$'\n'* ]] && return
   (( CURSOR == ${#BUFFER} )) || return
+  _armin_fetch suggest "$BUFFER"
+}
+
+# On an empty line: what usually comes after the command that ran last.
+_armin_predict() {
+  _armin_items=()
+  _armin_marks=()
+  _armin_sel=0
+  _armin_typed=$BUFFER
+  _armin_fetch next "$_armin_previous"
+}
+
+# Asks for the menu, `suggest` with what's typed or `next` with the previous
+# command, and reads it into _armin_items and _armin_marks.
+_armin_fetch() {
   local out item
-  if _armin_ask suggest "$ARMIN_MAX_ROWS" "$PWD" "$BUFFER"; then
+  if _armin_ask $1 "$ARMIN_MAX_ROWS" "$PWD" "$2"; then
     out=$_armin_reply
   else
     # No daemon answered: start one for the next keystroke, and ask armin
     # directly for this one.
     _armin_spawn
-    out=$("$_armin_bin" suggest --cwd "$PWD" --limit $ARMIN_MAX_ROWS -- "$BUFFER" 2>/dev/null) || return
+    if [[ $1 == next ]]; then
+      out=$("$_armin_bin" suggest --cwd "$PWD" --limit $ARMIN_MAX_ROWS --after "$2" -- '' 2>/dev/null) || return
+    else
+      out=$("$_armin_bin" suggest --cwd "$PWD" --limit $ARMIN_MAX_ROWS -- "$2" 2>/dev/null) || return
+    fi
   fi
   # One item per NUL: matched ranges, a tab, the command.
   for item in ${(0)out}; do
@@ -190,7 +211,18 @@ _armin_or_fallback() {
   elif [[ -n ${_armin_fallback[$name]} ]]; then zle "${_armin_fallback[$name]}"; fi
 }
 
-_armin_next()   { _armin_or_fallback next   _armin_move 1 }
+# Tab on an empty line opens the menu of what usually comes next, with the
+# first row on the line. With nothing to offer, Tab does what it did before.
+_armin_next() {
+  if (( ! _armin_open )) && [[ -z $BUFFER ]]; then
+    _armin_predict
+    if (( ${#_armin_items} )); then
+      _armin_move 1
+      return
+    fi
+  fi
+  _armin_or_fallback next _armin_move 1
+}
 _armin_prev()   { _armin_or_fallback prev   _armin_move -1 }
 _armin_down()   { _armin_or_fallback down   _armin_move 1 }
 _armin_up()     { _armin_or_fallback up     _armin_move -1 }
@@ -253,6 +285,8 @@ _armin_precmd() {
   local -i ms=$(( (EPOCHREALTIME - _armin_start) * 1000 ))
   "$_armin_bin" record --time ${_armin_start%.*} --duration $ms --exit $exit \
     --session $_armin_session --cwd "$_armin_cmd_pwd" -- "$_armin_cmd" &>/dev/null &!
+  # A typo that never ran doesn't say what comes next.
+  (( exit == 126 || exit == 127 )) || _armin_previous=$_armin_cmd
   _armin_cmd=''
 }
 

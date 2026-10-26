@@ -59,7 +59,9 @@ works alongside armin.
 
 ## Orders
 
-Start typing. The menu opens after the first character and follows every keystroke.
+Start typing. The menu opens after the first character and follows every keystroke. Or, on
+an empty line, press `Tab`: the menu opens with what you usually run next, its first row
+already on the line.
 
 | Key | Action |
 |---|---|
@@ -72,7 +74,8 @@ You see the whole command on the line before `Enter` runs it. Keep typing instea
 edit the command you picked.
 
 With the menu closed, every key does what it did before: `Tab` still completes files and
-flags, and in vi mode `Esc` still enters command mode.
+flags, and in vi mode `Esc` still enters command mode. On an empty line with nothing to
+predict, `Tab` does what it did before too.
 
 ## Strategy
 
@@ -83,6 +86,11 @@ with "command not found" is dropped.
 
 Commands that start with what you typed come first. Below them, fuzzy matches fill in, so
 `gco` finds `git checkout`, with the matched letters in bold.
+
+On an empty line there's nothing to match, so armin predicts. Each past time a command ran
+right after the one you just ran, in the same shell, counts on top of its score: after
+`git add .` comes `git commit`. A typo that failed with "command not found" doesn't count as
+what came before.
 
 ## Intel
 
@@ -107,14 +115,14 @@ Colors use zsh's highlight syntax, like `fg=blue,bold`, and default to your term
 
 ## Field report
 
-- **Swift.** About 2 ms per keystroke on a history of a thousand commands.
-- **Small.** About 1,000 lines of Rust and zsh, and two dependencies.
+- **Swift.** Ranking takes under a tenth of a millisecond per keystroke, 99 times in 100, on a
+  history of a thousand commands (`armin bench` measures yours).
+- **Small.** About 2,000 lines of Rust and zsh, tests included, and two dependencies.
 - **Native.** armin draws through zsh's own line editor, not a window over your terminal, so
   it works the same in tmux, zellij, herdr, screen and over ssh.
 
-armin is young. Coming up: a resident process so the menu stays instant with a hundred
-thousand commands, `armin bench` to measure the keystrokes armin saves you, suggestions on an
-empty line (what you usually run next), and zsh's own completions in the menu.
+armin is young. Coming up: zsh's own completions in the menu, so flags, files and git
+branches show up in it too.
 
 ## License
 
