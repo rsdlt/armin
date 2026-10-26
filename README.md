@@ -138,7 +138,28 @@ Like zsh, armin skips commands that start with a space when `HIST_IGNORE_SPACE` 
 
 ## Configure
 
-Set these before the `eval` line:
+armin reads `~/.config/armin/config.toml` when the shell starts. `armin config` prints every
+setting at its default, ready to save there:
+
+```sh
+mkdir -p ~/.config/armin && armin config > ~/.config/armin/config.toml
+```
+
+```toml
+theme = "survey-corps"   # or "default", "colossal": every color at once
+
+[menu]
+rows = 8
+panel = true
+
+[colors]                 # replace a theme's colors one by one
+selected = "fg=230,bg=22"
+```
+
+If the file has a mistake, the new shell says where and starts with the defaults. Open a new
+shell after changing it.
+
+Each setting is also a variable. One set before the `eval` line wins over the file:
 
 | Variable | Default | |
 |---|---|---|
@@ -160,7 +181,8 @@ otherwise.
 
 - **Swift.** Ranking takes under a tenth of a millisecond per keystroke, 99 times in 100, on a
   history of a thousand commands (`armin bench` measures yours).
-- **Small.** About 2,700 lines of Rust and zsh, tests included, and two dependencies.
+- **Small.** About 3,200 lines of Rust and zsh, tests included, and four dependencies: two for
+  the work, two to read the config file.
 - **Native.** armin draws through zsh's own line editor, not a window over your terminal, so
   it works the same in tmux, zellij, herdr, screen and over ssh.
 

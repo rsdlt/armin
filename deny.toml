@@ -9,6 +9,9 @@ allow = [
     # nucleo-matcher. File-level copyleft: fine to depend on unmodified; changes
     # to its own files would have to be published under MPL.
     "MPL-2.0",
+    # unicode-ident, under serde's derive macros: the Unicode data tables'
+    # permissive license.
+    "Unicode-3.0",
 ]
 
 [bans]

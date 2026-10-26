@@ -1,4 +1,5 @@
 mod bench;
+mod config;
 mod daemon;
 mod history;
 mod import;
@@ -21,6 +22,7 @@ Usage: eval \"$(armin init zsh)\"     in ~/.zshrc
        armin bench [--last <n>]     replay your last n commands (default 2000) and
                                     count the keystrokes armin saves
        armin daemon stop            stop the daemon; the next keystroke starts it
+       armin config                 where the config file goes, and what it holds
 
 Options:
   -h, --help     this help; `armin <command> --help` for one command's
@@ -64,6 +66,20 @@ each command you run. Put this in ~/.zshrc, after anything that binds Tab:
   eval \"$(armin init zsh)\"
 
 zsh is the only shell armin speaks for now.
+";
+
+const CONFIG_HELP: &str = "\
+Usage: armin config
+
+Prints where armin's config file goes, ~/.config/armin/config.toml
+($ARMIN_CONFIG, or $XDG_CONFIG_HOME/armin if set), and every setting it can
+hold, at its default. To start one:
+
+  mkdir -p ~/.config/armin && armin config > ~/.config/armin/config.toml
+
+armin reads it when the shell starts (armin init), so open a new shell after
+changing it. A variable set before the eval line, like ARMIN_MAX_ROWS, wins
+over the file.
 ";
 
 const IMPORT_HELP: &str = "\
@@ -122,6 +138,7 @@ history, with when and where it ran and how it ended.
 fn help_for(command: &str) -> Option<&'static str> {
     Some(match command {
         "init" => INIT_HELP,
+        "config" => CONFIG_HELP,
         "import" => IMPORT_HELP,
         "bench" => BENCH_HELP,
         "daemon" => DAEMON_HELP,
@@ -140,6 +157,7 @@ enum Cli {
     Help(&'static str),
     Version,
     Init,
+    Config,
     Import(Option<PathBuf>),
     Bench(usize),
     Daemon,
@@ -183,6 +201,10 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
 
 fn parse_command(cmd: &str, rest: &[String]) -> Result<Cli, String> {
     match cmd {
+        "config" => match rest {
+            [] => Ok(Cli::Config),
+            _ => Err("config takes nothing".into()),
+        },
         "init" => match rest {
             [shell] if shell == "zsh" => Ok(Cli::Init),
             [shell] => Err(format!("armin speaks zsh only for now, not '{shell}'")),
@@ -288,6 +310,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Ok(Cli::Init) => print_init(),
+        Ok(Cli::Config) => print_config(),
         Ok(Cli::Import(file)) => import(file),
         Ok(Cli::Bench(last)) => print_bench(last),
         Ok(Cli::Daemon) => history::data_dir().and_then(|dir| daemon::run(&dir)),
@@ -333,7 +356,35 @@ fn print_init() -> Result<()> {
         .replace("__ARMIN_BIN__", &quote(&exe.to_string_lossy()))
         .replace("__ARMIN_SOCK__", &quote(&sock.to_string_lossy()))
         .replace("__ARMIN_VERSION__", env!("CARGO_PKG_VERSION"));
+    // The config file's settings go first, as defaults the script keeps. A
+    // file armin can't use is no reason for a shell without armin: it says
+    // why, and starts with the defaults.
+    let settings = config::path().and_then(|path| {
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => Some(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+        };
+        config::zsh_defaults(text.as_deref()).with_context(|| path.display().to_string())
+    });
+    match settings {
+        Ok(settings) => print!("{settings}"),
+        Err(e) => println!("print -ru2 -- {}", quote(&format!("armin: {e:#}"))),
+    }
     print!("{script}");
+    Ok(())
+}
+
+/// Where the config file goes, and every setting it can hold.
+fn print_config() -> Result<()> {
+    let path = config::path()?;
+    let state = if path.exists() {
+        ""
+    } else {
+        " (not there yet)"
+    };
+    println!("# {}{state}\n", path.display());
+    print!("{}", config::SAMPLE);
     Ok(())
 }
 

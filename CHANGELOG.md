@@ -12,6 +12,11 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_HL_DESCRIPTION` colors a completion's description, grey by default, so the
   candidates stand out from it.
 - `armin import` says when your zsh history has no times, and how to have zsh keep them.
+- A config file, `~/.config/armin/config.toml`, read when the shell starts: the menu's rows,
+  the panel, the prompt's width, the colors one by one, and three themes for them all at once
+  (`default`, `survey-corps`, `colossal`). `armin config` prints every setting at its default.
+  A variable set before the `eval` line still wins, and a mistake in the file is reported
+  with its line while the shell starts with the defaults.
 - A panel beside the menu tells you about the selected row: for a command from your history,
   how often and when it last ran, where, its last exit code and how long it takes; for a row
   the menu cuts short, the whole command or description. With it on, the menu takes at most

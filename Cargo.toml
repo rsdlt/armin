@@ -31,6 +31,8 @@ pkg-fmt = "tgz"
 [dependencies]
 anyhow = "1.0.104"
 nucleo-matcher = "0.3.1"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
