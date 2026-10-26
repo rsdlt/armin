@@ -5,6 +5,9 @@
 //! directory count again on their own, so a project's commands lead inside
 //! it. Commands that start with what you typed always come first; fuzzy
 //! matches fill in below them.
+//!
+//! The index keeps each distinct command once, with its runs, so a keystroke
+//! only scores the commands that match it.
 
 use std::collections::HashMap;
 
@@ -18,6 +21,11 @@ const HERE_WEIGHT: f64 = 1.5;
 /// Fuzzy matches start at this many typed characters; below it they match
 /// nearly everything.
 const FUZZY_MIN_CHARS: usize = 2;
+/// The directory of a run armin doesn't know the directory of.
+const NO_DIR: u32 = u32::MAX;
+
+/// A match while ranking: prefix match, score, last run, index, matched ranges.
+type Ranked = (bool, f64, i64, usize, Vec<(usize, usize)>);
 
 #[derive(Debug, PartialEq)]
 pub struct Suggestion {
@@ -26,123 +34,172 @@ pub struct Suggestion {
     pub matched: Vec<(usize, usize)>,
 }
 
+/// Every command in the history, once each.
 #[derive(Default)]
-struct Stats {
-    frecency: f64,
-    here: f64,
-    runs: u32,
+pub struct Index {
+    commands: Vec<Command>,
+    by_text: HashMap<String, usize>,
+    dirs: HashMap<String, u32>,
+}
+
+struct Command {
+    text: String,
+    /// The runs that count toward the score.
+    runs: Vec<Run>,
+    total: u32,
     /// Runs the shell couldn't start: not found (127) or not executable (126).
     broken: u32,
     last: i64,
 }
 
-impl Stats {
-    fn score(&self) -> f64 {
-        (1.0 + self.frecency).ln() + HERE_WEIGHT * (1.0 + self.here).ln()
-    }
+struct Run {
+    time: i64,
+    weight: f64,
+    dir: u32,
 }
 
-/// Up to `limit` suggestions for `typed`, best first. `now` is Unix seconds.
-pub fn suggest(
-    events: &[Event],
-    typed: &str,
-    cwd: &str,
-    now: i64,
-    limit: usize,
-) -> Vec<Suggestion> {
-    if typed.is_empty() || limit == 0 {
-        return Vec::new();
+impl Index {
+    pub fn from_events(events: &[Event]) -> Index {
+        let mut index = Index::default();
+        for e in events {
+            index.add(e);
+        }
+        index
     }
-    let stats = gather(events, cwd, now);
 
-    let typed_chars = typed.chars().count();
-    let fuzzy = (typed_chars >= FUZZY_MIN_CHARS).then(|| {
-        Atom::new(
-            typed,
-            CaseMatching::Smart,
-            Normalization::Smart,
-            AtomKind::Fuzzy,
-            false,
-        )
-    });
-    let mut matcher = Matcher::new(Config::DEFAULT);
-    let (mut buf, mut indices) = (Vec::new(), Vec::new());
-
-    // (prefix match, score, last run, suggestion)
-    let mut ranked: Vec<(bool, f64, i64, Suggestion)> = Vec::new();
-    for (command, s) in &stats {
-        if *command == typed || s.broken == s.runs {
-            continue;
+    pub fn add(&mut self, e: &Event) {
+        let next = self.commands.len();
+        let i = *self.by_text.entry(e.command.clone()).or_insert(next);
+        if i == next {
+            self.commands.push(Command {
+                text: e.command.clone(),
+                runs: Vec::new(),
+                total: 0,
+                broken: 0,
+                last: i64::MIN,
+            });
         }
-        let base = s.score();
-        if command.starts_with(typed) {
-            let matched = vec![(0, typed_chars)];
-            ranked.push((
-                true,
-                base,
-                s.last,
-                Suggestion {
-                    command: command.to_string(),
-                    matched,
-                },
-            ));
-            continue;
-        }
-        let Some(atom) = &fuzzy else { continue };
-        indices.clear();
-        let Some(quality) =
-            atom.indices(Utf32Str::new(command, &mut buf), &mut matcher, &mut indices)
-        else {
-            continue;
+        let next_dir = self.dirs.len() as u32;
+        let dir = match &e.cwd {
+            Some(cwd) => *self.dirs.entry(cwd.clone()).or_insert(next_dir),
+            None => NO_DIR,
         };
-        // nucleo scores a tight match of a few characters around 50 to 150.
-        let score = base + f64::from(quality) / 100.0;
-        let matched = ranges(&mut indices);
-        ranked.push((
-            false,
-            score,
-            s.last,
-            Suggestion {
-                command: command.to_string(),
-                matched,
-            },
-        ));
-    }
-
-    ranked.sort_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then(b.1.total_cmp(&a.1))
-            .then(b.2.cmp(&a.2))
-            .then_with(|| a.3.command.cmp(&b.3.command))
-    });
-    ranked.into_iter().take(limit).map(|r| r.3).collect()
-}
-
-fn gather<'a>(events: &'a [Event], cwd: &str, now: i64) -> HashMap<&'a str, Stats> {
-    let mut stats: HashMap<&str, Stats> = HashMap::new();
-    for e in events {
-        let s = stats.entry(e.command.as_str()).or_default();
-        s.runs += 1;
-        s.last = s.last.max(e.time);
+        let c = &mut self.commands[i];
+        c.total += 1;
+        c.last = c.last.max(e.time);
         let weight = match e.exit {
             None | Some(0) => 1.0,
             Some(126 | 127) => {
-                s.broken += 1;
-                continue;
+                c.broken += 1;
+                return;
             }
             // Stopped with Ctrl-C (130) or a closed pipe (141): it ran fine.
             Some(130 | 141) => 1.0,
             // grep finding nothing exits 1 too, so a failure only halves a run.
             Some(_) => 0.5,
         };
-        let age_days = (now - e.time).max(0) as f64 / 86_400.0;
-        let w = weight / (1.0 + age_days / 7.0);
-        s.frecency += w;
-        if e.cwd.as_deref() == Some(cwd) {
-            s.here += w;
-        }
+        c.runs.push(Run {
+            time: e.time,
+            weight,
+            dir,
+        });
     }
-    stats
+
+    /// Up to `limit` suggestions for `typed`, best first. `now` is Unix seconds.
+    pub fn suggest(&self, typed: &str, cwd: &str, now: i64, limit: usize) -> Vec<Suggestion> {
+        if typed.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let here = self.dirs.get(cwd).copied().unwrap_or(NO_DIR);
+        let typed_chars = typed.chars().count();
+        let fuzzy = (typed_chars >= FUZZY_MIN_CHARS).then(|| {
+            Atom::new(
+                typed,
+                CaseMatching::Smart,
+                Normalization::Smart,
+                AtomKind::Fuzzy,
+                false,
+            )
+        });
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let (mut buf, mut indices) = (Vec::new(), Vec::new());
+
+        let mut ranked: Vec<Ranked> = Vec::new();
+        for (i, c) in self.commands.iter().enumerate() {
+            if c.text == typed || c.broken == c.total {
+                continue;
+            }
+            if c.text.starts_with(typed) {
+                ranked.push((true, c.score(here, now), c.last, i, vec![(0, typed_chars)]));
+                continue;
+            }
+            let Some(atom) = &fuzzy else { continue };
+            indices.clear();
+            let haystack = Utf32Str::new(&c.text, &mut buf);
+            let Some(quality) = atom.indices(haystack, &mut matcher, &mut indices) else {
+                continue;
+            };
+            // nucleo scores a tight match of a few characters around 50 to 150.
+            let score = c.score(here, now) + f64::from(quality) / 100.0;
+            ranked.push((false, score, c.last, i, ranges(&mut indices)));
+        }
+
+        ranked.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then(b.1.total_cmp(&a.1))
+                .then(b.2.cmp(&a.2))
+                .then_with(|| self.commands[a.3].text.cmp(&self.commands[b.3].text))
+        });
+        ranked
+            .into_iter()
+            .take(limit)
+            .map(|(_, _, _, i, matched)| Suggestion {
+                command: self.commands[i].text.clone(),
+                matched,
+            })
+            .collect()
+    }
+
+    /// The latest command that starts with `typed`, typos and all: what
+    /// zsh-autosuggestions would offer.
+    pub fn most_recent(&self, typed: &str) -> Option<&str> {
+        self.commands
+            .iter()
+            .filter(|c| c.text.starts_with(typed))
+            .max_by_key(|c| c.last)
+            .map(|c| c.text.as_str())
+    }
+}
+
+impl Command {
+    fn score(&self, here: u32, now: i64) -> f64 {
+        let (mut frecency, mut local) = (0.0, 0.0);
+        for run in &self.runs {
+            let age_days = (now - run.time).max(0) as f64 / 86_400.0;
+            let w = run.weight / (1.0 + age_days / 7.0);
+            frecency += w;
+            if run.dir == here && here != NO_DIR {
+                local += w;
+            }
+        }
+        (1.0f64 + frecency).ln() + HERE_WEIGHT * (1.0f64 + local).ln()
+    }
+}
+
+/// The form the shell reads: per suggestion, its matched ranges as
+/// `start-end,...`, a tab, the command, and a NUL.
+pub fn encode(suggestions: &[Suggestion], out: &mut String) {
+    for s in suggestions {
+        for (n, (a, b)) in s.matched.iter().enumerate() {
+            if n > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!("{a}-{b}"));
+        }
+        out.push('\t');
+        out.push_str(&s.command);
+        out.push('\0');
+    }
 }
 
 /// Sorted character indices → ranges of consecutive ones.
@@ -180,6 +237,16 @@ mod tests {
 
     fn ok(command: &str, days_ago: i64) -> Event {
         run(command, days_ago, "/elsewhere", Some(0))
+    }
+
+    fn suggest(
+        events: &[Event],
+        typed: &str,
+        cwd: &str,
+        now: i64,
+        limit: usize,
+    ) -> Vec<Suggestion> {
+        Index::from_events(events).suggest(typed, cwd, now, limit)
     }
 
     fn top(events: &[Event], typed: &str, cwd: &str) -> Vec<String> {
@@ -263,6 +330,27 @@ mod tests {
         let got = suggest(&events, "ctst", "/x", NOW, 10);
         assert_eq!(got[0].command, "cargo test");
         assert_eq!(got[0].matched, [(0, 1), (6, 7), (8, 10)]);
+    }
+
+    #[test]
+    fn grows_one_command_at_a_time() {
+        let mut index = Index::from_events(&[ok("make test", 2)]);
+        index.add(&ok("make lint", 0));
+        index.add(&ok("make lint", 0));
+        assert_eq!(index.suggest("make", "/x", NOW, 10)[0].command, "make lint");
+    }
+
+    #[test]
+    fn most_recent_is_the_autosuggestions_guess() {
+        let events = [
+            ok("git status", 1),
+            ok("git stash", 3),
+            run("git stauts", 0, "/x", Some(127)),
+        ];
+        let index = Index::from_events(&events);
+        assert_eq!(index.most_recent("git sta"), Some("git stauts"));
+        assert_eq!(index.most_recent("git stas"), Some("git stash"));
+        assert_eq!(index.most_recent("make"), None);
     }
 
     #[test]

@@ -8,10 +8,12 @@
 # Enter fills the line with the selection (it does not run it), Esc closes.
 # With the menu closed, every key does what it did before.
 
-zmodload zsh/datetime zsh/parameter
+zmodload zsh/datetime zsh/parameter zsh/system zsh/net/socket
 autoload -Uz add-zle-hook-widget add-zsh-hook
 
 typeset -g  _armin_bin=__ARMIN_BIN__
+typeset -g  _armin_sock=__ARMIN_SOCK__
+typeset -g  _armin_version=__ARMIN_VERSION__
 typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
 typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
 typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
@@ -22,6 +24,35 @@ typeset -ga _armin_marks      # per item: matched ranges, "start-end,..."
 typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
 typeset -g  _armin_seen=''    # buffer and cursor the menu was computed for
 typeset -gi _armin_open=0
+
+# ── The daemon ──────────────────────────────────────────────────────────────
+
+# Sends a request (the arguments) to the daemon and leaves what follows its
+# "ok" in _armin_reply. Fails when no daemon answers, or it answers anything
+# else, such as "restart" after an upgrade.
+typeset -g _armin_reply=''
+_armin_ask() {
+  local fd chunk req=$_armin_version$'\0' arg
+  for arg in "$@"; do req+=$arg$'\0'; done
+  zsocket $_armin_sock 2>/dev/null || return 1
+  fd=$REPLY
+  _armin_reply=''
+  if syswrite -o $fd -- $req 2>/dev/null; then
+    while sysread -i $fd -t 0.5 chunk 2>/dev/null; do _armin_reply+=$chunk; done
+  fi
+  exec {fd}>&-
+  [[ $_armin_reply == ok$'\0'* ]] || return 1
+  _armin_reply=${_armin_reply#ok$'\0'}
+}
+
+# Starts a daemon, detached from this shell, at most once every few seconds:
+# while it loads, each keystroke would try again.
+typeset -gi _armin_spawned=0
+_armin_spawn() {
+  (( EPOCHSECONDS - _armin_spawned < 5 )) && return
+  _armin_spawned=$EPOCHSECONDS
+  nohup "$_armin_bin" daemon </dev/null &>/dev/null &!
+}
 
 # ── Suggesting ──────────────────────────────────────────────────────────────
 
@@ -47,7 +78,14 @@ _armin_compute() {
   [[ -z $BUFFER || $BUFFER == *$'\n'* ]] && return
   (( CURSOR == ${#BUFFER} )) || return
   local out item
-  out=$("$_armin_bin" suggest --cwd "$PWD" --limit $ARMIN_MAX_ROWS -- "$BUFFER" 2>/dev/null) || return
+  if _armin_ask suggest "$ARMIN_MAX_ROWS" "$PWD" "$BUFFER"; then
+    out=$_armin_reply
+  else
+    # No daemon answered: start one for the next keystroke, and ask armin
+    # directly for this one.
+    _armin_spawn
+    out=$("$_armin_bin" suggest --cwd "$PWD" --limit $ARMIN_MAX_ROWS -- "$BUFFER" 2>/dev/null) || return
+  fi
   # One item per NUL: matched ranges, a tab, the command.
   for item in ${(0)out}; do
     _armin_marks+=( "${item%%$'\t'*}" )
@@ -224,3 +262,6 @@ _armin_precmd() {
 # precmd first in line, so $? is still the command's.
 precmd_functions=( _armin_precmd ${precmd_functions:#_armin_precmd} )
 add-zsh-hook preexec _armin_preexec
+
+# Have the daemon ready before the first keystroke.
+_armin_ask ping || _armin_spawn

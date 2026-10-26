@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Autocomplete for zsh: a menu of your likeliest commands as you type, ranked from your history"
 license = "MIT"
-rust-version = "1.88"
+rust-version = "1.89"
 readme = "README.md"
 # What the crate ships: the code, its tests and the docs crates.io shows. A list
 # of what goes in, so a stray file in the working tree never ends up published.

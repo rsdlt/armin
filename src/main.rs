@@ -1,3 +1,5 @@
+mod bench;
+mod daemon;
 mod history;
 mod import;
 mod rank;
@@ -6,17 +8,18 @@ use std::collections::HashSet;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 
-use history::Event;
+use history::{Event, now};
 
 const HELP: &str = "\
 armin — autocomplete for your shell. It reads the battlefield and knows your next move.
 
 Usage: eval \"$(armin init zsh)\"     in ~/.zshrc
        armin import [file]          bring in your zsh history (default ~/.zsh_history)
+       armin bench [--last <n>]     replay your last n commands (default 2000) and
+                                    count the keystrokes armin saves
 
 As you type, a menu under the prompt lists the commands you're most likely
 after: the ones you run often and lately, ahead of the rest, and the ones you
@@ -29,9 +32,15 @@ Keys while the menu is open:
 With the menu closed, keys do what they always did: Tab still completes.
 
 History lives in ~/.local/share/armin/history ($ARMIN_DATA_DIR or
-$XDG_DATA_HOME/armin if set), a text file with one command per line.
+$XDG_DATA_HOME/armin if set), a text file with one command per line, readable
+by you alone.
+
+The shell starts a small daemon that keeps your history in memory and answers
+each keystroke over a socket next to the log. It restarts itself when armin is
+upgraded; `armin daemon stop` stops it, and the next keystroke starts it again.
 
 Called by the shell, not by you:
+  armin daemon
   armin suggest --cwd <dir> [--limit <n>] -- <typed>
   armin record --time <t> --duration <ms> --exit <code> --session <id> --cwd <dir> -- <command>
 ";
@@ -42,6 +51,9 @@ enum Cli {
     Version,
     Init,
     Import(Option<PathBuf>),
+    Bench(usize),
+    Daemon,
+    DaemonStop,
     Suggest {
         cwd: String,
         limit: usize,
@@ -66,6 +78,19 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
             [] => Ok(Cli::Import(None)),
             [file] => Ok(Cli::Import(Some(file.into()))),
             _ => Err("import takes at most one file".into()),
+        },
+        "bench" => match rest {
+            [] => Ok(Cli::Bench(2000)),
+            [flag, n] if flag == "--last" => n
+                .parse()
+                .map(Cli::Bench)
+                .map_err(|_| format!("--last wants a number, not '{n}'")),
+            _ => Err("bench takes only --last <n>".into()),
+        },
+        "daemon" => match rest {
+            [] => Ok(Cli::Daemon),
+            [arg] if arg == "stop" => Ok(Cli::DaemonStop),
+            _ => Err("daemon takes nothing, or stop".into()),
         },
         "suggest" => {
             let (flags, typed) = split_command(rest)?;
@@ -148,6 +173,15 @@ fn main() -> ExitCode {
         }
         Ok(Cli::Init) => print_init(),
         Ok(Cli::Import(file)) => import(file),
+        Ok(Cli::Bench(last)) => print_bench(last),
+        Ok(Cli::Daemon) => history::data_dir().and_then(|dir| daemon::run(&dir)),
+        Ok(Cli::DaemonStop) => history::data_dir()
+            .and_then(|dir| daemon::stop(&dir))
+            .map(|ran| {
+                if !ran {
+                    println!("armin: no daemon was running");
+                }
+            }),
         Ok(Cli::Suggest { cwd, limit, typed }) => print_suggestions(&cwd, limit, &typed),
         Ok(Cli::Record(event)) => {
             history::log_path().and_then(|log| history::append(&log, &[event]))
@@ -167,29 +201,43 @@ fn main() -> ExitCode {
 }
 
 /// The zsh script, pointing at this very binary so a build that isn't on
-/// PATH works too.
+/// PATH works too, and at the daemon's socket.
 fn print_init() -> Result<()> {
     let exe = std::env::current_exe().context("finding the armin binary")?;
-    let quoted = format!("'{}'", exe.to_string_lossy().replace('\'', r"'\''"));
-    print!(
-        "{}",
-        include_str!("init.zsh").replace("__ARMIN_BIN__", &quoted)
-    );
+    let data = history::data_dir()?;
+    history::ensure_dir(&data)?;
+    let sock = daemon::socket_path(&data)?;
+    let quote = |s: &str| format!("'{}'", s.replace('\'', r"'\''"));
+    let script = include_str!("init.zsh")
+        .replace("__ARMIN_BIN__", &quote(&exe.to_string_lossy()))
+        .replace("__ARMIN_SOCK__", &quote(&sock.to_string_lossy()))
+        .replace("__ARMIN_VERSION__", env!("CARGO_PKG_VERSION"));
+    print!("{script}");
     Ok(())
 }
 
-/// Ranges and command per suggestion, each ending in a NUL, for the shell.
+/// What the daemon would answer, for when it isn't running.
 fn print_suggestions(cwd: &str, limit: usize, typed: &str) -> Result<()> {
     let events = history::read(&history::log_path()?)?;
     let mut out = String::new();
-    for s in rank::suggest(&events, typed, cwd, now(), limit) {
-        let ranges: Vec<String> = s.matched.iter().map(|(a, b)| format!("{a}-{b}")).collect();
-        out.push_str(&ranges.join(","));
-        out.push('\t');
-        out.push_str(&s.command);
-        out.push('\0');
-    }
+    rank::encode(
+        &rank::Index::from_events(&events).suggest(typed, cwd, now(), limit),
+        &mut out,
+    );
     io::stdout().lock().write_all(out.as_bytes())?;
+    Ok(())
+}
+
+fn print_bench(last: usize) -> Result<()> {
+    let log = history::log_path()?;
+    let events = history::read(&log)?;
+    if events.len() < 2 {
+        bail!(
+            "{} has too little history to replay; try armin import",
+            log.display()
+        );
+    }
+    print!("{}", bench::run(&events, last, 8).render());
     Ok(())
 }
 
@@ -224,10 +272,4 @@ fn import(file: Option<PathBuf>) -> Result<()> {
         log.display()
     );
     Ok(())
-}
-
-fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
 }
