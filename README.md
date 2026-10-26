@@ -1,4 +1,6 @@
 <p align="center">
+  <img src="docs/logo.svg" width="160" alt="armin: the Long-Range Scouting Formation on a map, a green flare marking the route ahead">
+  <br>
   <em>Autocomplete for zsh that reads the battlefield. A menu of your next move, as you type.</em>
 </p>
 
