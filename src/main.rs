@@ -38,6 +38,7 @@ Keys while the menu is open:
 With the menu closed, Tab opens it: on an empty line with what you usually run
 next, on a word with zsh's completions for it, the ones you've used first.
 Load zsh's completion system (autoload -Uz compinit && compinit) for those.
+A panel beside the menu tells you about the selected row (ARMIN_PANEL=0: off).
 Other keys do what they always did.
 
 History lives in ~/.local/share/armin/history ($ARMIN_DATA_DIR or

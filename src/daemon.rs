@@ -13,7 +13,8 @@
 //! the command that ran last) the suggestions follow in the same form `armin
 //! suggest` prints. For `order` (the line before the word being completed,
 //! and zsh's candidates for it, one per line) the indices of the candidates
-//! follow, best first, one per line. A client newer
+//! follow, best first, one per line. For `details` (a command) the lines of
+//! the panel beside the menu follow, one per line. A client newer
 //! than the daemon means armin was upgraded: the daemon answers `restart` and
 //! exits, and the shell starts the new one.
 
@@ -214,6 +215,20 @@ fn serve(mut stream: UnixStream, state: &Mutex<State>) -> Result<Flow> {
             }
             stream.write_all(out.as_bytes())?;
         }
+        ["details", command] => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let lines = {
+                let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+                state.refresh()?;
+                state.index.details(command, history::now(), &home)
+            };
+            let mut out = String::from("ok\0");
+            for line in lines {
+                out.push_str(&line);
+                out.push('\n');
+            }
+            stream.write_all(out.as_bytes())?;
+        }
         ["order", line, candidates] => {
             let candidates: Vec<&str> = candidates.split('\n').collect();
             let order = {
@@ -238,6 +253,7 @@ fn arity(command: &str) -> usize {
     match command {
         "suggest" | "next" => 3,
         "order" => 2,
+        "details" => 1,
         _ => 0,
     }
 }
@@ -312,6 +328,7 @@ mod tests {
         assert_eq!(arity("suggest"), 3);
         assert_eq!(arity("next"), 3);
         assert_eq!(arity("order"), 2);
+        assert_eq!(arity("details"), 1);
         assert_eq!(arity("ping"), 0);
     }
 }

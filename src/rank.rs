@@ -49,6 +49,8 @@ pub struct Index {
     commands: Vec<Command>,
     by_text: HashMap<String, usize>,
     dirs: HashMap<String, u32>,
+    /// Each directory's path, by its number in `dirs`.
+    dir_names: Vec<String>,
     /// Per session, the command that ran last.
     last_in_session: HashMap<String, usize>,
 }
@@ -61,6 +63,8 @@ struct Command {
     /// Runs the shell couldn't start: not found (127) or not executable (126).
     broken: u32,
     last: i64,
+    /// How the latest run ended, if the shell said.
+    last_exit: Option<i32>,
     /// Runs that came right after another command in the same session.
     after: Vec<After>,
 }
@@ -74,6 +78,7 @@ struct Run {
     time: i64,
     weight: f64,
     dir: u32,
+    duration_ms: Option<u64>,
 }
 
 impl Index {
@@ -95,16 +100,23 @@ impl Index {
                 total: 0,
                 broken: 0,
                 last: i64::MIN,
+                last_exit: None,
                 after: Vec::new(),
             });
         }
         let next_dir = self.dirs.len() as u32;
         let dir = match &e.cwd {
-            Some(cwd) => *self.dirs.entry(cwd.clone()).or_insert(next_dir),
+            Some(cwd) => *self.dirs.entry(cwd.clone()).or_insert_with(|| {
+                self.dir_names.push(cwd.clone());
+                next_dir
+            }),
             None => NO_DIR,
         };
         let c = &mut self.commands[i];
         c.total += 1;
+        if e.time >= c.last {
+            c.last_exit = e.exit;
+        }
         c.last = c.last.max(e.time);
         let weight = match e.exit {
             None | Some(0) => 1.0,
@@ -121,6 +133,7 @@ impl Index {
             time: e.time,
             weight,
             dir,
+            duration_ms: e.duration_ms,
         });
         // A typo that never ran isn't what came before the command it was
         // retyped as, so only commands that ran make it here.
@@ -290,6 +303,65 @@ impl Index {
         order
     }
 
+    /// What armin knows about `command`, for the panel beside the menu: how
+    /// often and when it ran, where, how it last ended and how long it
+    /// takes. `home` shortens paths to `~`.
+    pub fn details(&self, command: &str, now: i64, home: &str) -> Vec<String> {
+        let Some(&i) = self.by_text.get(command) else {
+            return Vec::new();
+        };
+        let c = &self.commands[i];
+        let times = match c.total {
+            1 => "once".to_owned(),
+            2 => "twice".to_owned(),
+            n => format!("{n} times"),
+        };
+        let mut lines = vec![format!("ran {times}, last {}", ago(now - c.last))];
+
+        let mut per_dir: HashMap<u32, u32> = HashMap::new();
+        for run in c.runs.iter().filter(|r| r.dir != NO_DIR) {
+            *per_dir.entry(run.dir).or_default() += 1;
+        }
+        // The most runs, then the lowest number, so ties come out the same.
+        if let Some((&dir, &n)) = per_dir
+            .iter()
+            .max_by_key(|(d, n)| (**n, std::cmp::Reverse(**d)))
+        {
+            let path = &self.dir_names[dir as usize];
+            let path = match path.strip_prefix(home) {
+                Some(rest) if !home.is_empty() && (rest.is_empty() || rest.starts_with('/')) => {
+                    format!("~{rest}")
+                }
+                _ => path.clone(),
+            };
+            let known = c.runs.iter().filter(|r| r.dir != NO_DIR).count();
+            lines.push(if n as usize == known {
+                format!("in {path}")
+            } else {
+                format!("mostly in {path} ({n} of {known})")
+            });
+        }
+
+        let mut ended = match c.last_exit {
+            Some(0) => "last run ok".to_owned(),
+            Some(code) => format!("last exit {code}"),
+            None => String::new(),
+        };
+        let mut durations: Vec<u64> = c.runs.iter().filter_map(|r| r.duration_ms).collect();
+        if !durations.is_empty() {
+            durations.sort_unstable();
+            let typical = durations[durations.len() / 2];
+            if !ended.is_empty() {
+                ended.push_str(", ");
+            }
+            ended.push_str(&format!("takes {}", took(typical)));
+        }
+        if !ended.is_empty() {
+            lines.push(ended);
+        }
+        lines
+    }
+
     /// The latest command that starts with `typed`, typos and all: what
     /// zsh-autosuggestions would offer.
     pub fn most_recent(&self, typed: &str) -> Option<&str> {
@@ -312,6 +384,35 @@ impl Command {
             }
         }
         (1.0f64 + frecency).ln() + HERE_WEIGHT * (1.0f64 + local).ln()
+    }
+}
+
+/// `secs` before now, in words.
+fn ago(secs: i64) -> String {
+    let plural = |n: i64, unit: &str| {
+        if n == 1 {
+            format!("1 {unit} ago")
+        } else {
+            format!("{n} {unit}s ago")
+        }
+    };
+    match secs.max(0) {
+        s if s < 60 => "just now".to_owned(),
+        s if s < 3_600 => plural(s / 60, "minute"),
+        s if s < 86_400 => plural(s / 3_600, "hour"),
+        s if s < 2 * 86_400 => "yesterday".to_owned(),
+        s if s < 14 * 86_400 => plural(s / 86_400, "day"),
+        s if s < 60 * 86_400 => plural(s / (7 * 86_400), "week"),
+        s => plural(s / (30 * 86_400), "month"),
+    }
+}
+
+/// A duration in milliseconds, in words.
+fn took(ms: u64) -> String {
+    match ms {
+        ms if ms < 1_000 => format!("{ms} ms"),
+        ms if ms < 60_000 => format!("{:.1} s", ms as f64 / 1_000.0),
+        ms => format!("{} min", (ms + 30_000) / 60_000),
     }
 }
 
@@ -430,6 +531,49 @@ mod tests {
         let events = [ok("vim notes", 1), other, ok("git diff", 1)];
         assert_eq!(predict(&events, Some("vim notes"))[0], "git diff");
         assert_eq!(Index::from_events(&events).last_in("t"), Some("cargo test"));
+    }
+
+    #[test]
+    fn details_for_the_panel() {
+        let mut events = vec![
+            run("cargo test", 9, "/home/r/armin", Some(0)),
+            run("cargo test", 2, "/home/r/armin", Some(0)),
+            run("cargo test", 1, "/home/r/levi", Some(101)),
+        ];
+        events[0].duration_ms = Some(4_000);
+        events[1].duration_ms = Some(6_500);
+        events[2].duration_ms = Some(900);
+        let index = Index::from_events(&events);
+        assert_eq!(
+            index.details("cargo test", NOW, "/home/r"),
+            [
+                "ran 3 times, last yesterday",
+                "mostly in ~/armin (2 of 3)",
+                "last exit 101, takes 4.0 s",
+            ]
+        );
+        assert!(index.details("never ran", NOW, "/home/r").is_empty());
+
+        // Imported: no directory, exit code or duration.
+        let mut imported = ok("ls", 0);
+        imported.cwd = None;
+        imported.exit = None;
+        assert_eq!(
+            Index::from_events(&[imported]).details("ls", NOW + 30, ""),
+            ["ran once, last just now"]
+        );
+    }
+
+    #[test]
+    fn durations_and_ages_in_words() {
+        assert_eq!(took(320), "320 ms");
+        assert_eq!(took(4_250), "4.2 s");
+        assert_eq!(took(185_000), "3 min");
+        assert_eq!(ago(90), "1 minute ago");
+        assert_eq!(ago(7_200), "2 hours ago");
+        assert_eq!(ago(3 * 86_400), "3 days ago");
+        assert_eq!(ago(20 * 86_400), "2 weeks ago");
+        assert_eq!(ago(100 * 86_400), "3 months ago");
     }
 
     #[test]

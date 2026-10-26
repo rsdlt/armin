@@ -12,6 +12,10 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_HL_DESCRIPTION` colors a completion's description, grey by default, so the
   candidates stand out from it.
 - `armin import` says when your zsh history has no times, and how to have zsh keep them.
+- A panel beside the menu tells you about the selected row: for a command from your history,
+  how often and when it last ran, where, its last exit code and how long it takes; for a row
+  the menu cuts short, the whole command or description. With it on, the menu takes at most
+  60% of the pane. It hides where the pane is too narrow, and `ARMIN_PANEL=0` turns it off.
 
 ### Changed
 

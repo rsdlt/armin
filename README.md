@@ -93,6 +93,11 @@ menu is open, `Esc` and then `Tab`.
 | `Enter` | run the line |
 | `Esc` | put back what you typed and close the menu |
 
+Beside the menu, a panel tells you about the selected row: for a command from your history,
+how often and when it last ran, where, how it ended and how long it takes; for a row the menu
+cuts short, the whole command or description. It shows where the pane has room for it, and
+`ARMIN_PANEL=0` turns it off.
+
 You see the whole command on the line before `Enter` runs it. Keep typing instead, and you
 edit the command you picked.
 
@@ -138,6 +143,8 @@ Set these before the `eval` line:
 | `ARMIN_HL_MATCH` | `bold` | the letters that match what you typed |
 | `ARMIN_HL_SELECTED` | `standout` | the selected row |
 | `ARMIN_HL_DESCRIPTION` | `fg=8` | a completion's description |
+| `ARMIN_HL_PANEL` | `fg=8` | the line between the menu and the panel |
+| `ARMIN_PANEL` | `1` | the panel beside the menu; `0` turns it off |
 | `ARMIN_PROMPT_WIDTH` | measured | your prompt's last line, so the menu lines up under the word |
 
 Colors use zsh's highlight syntax, like `fg=blue,bold`, and default to your terminal's palette.

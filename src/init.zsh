@@ -21,6 +21,8 @@ typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
 typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
 typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
 typeset -g  ARMIN_HL_DESCRIPTION=${ARMIN_HL_DESCRIPTION:-fg=8}
+typeset -g  ARMIN_HL_PANEL=${ARMIN_HL_PANEL:-fg=8}
+typeset -gi ARMIN_PANEL=${ARMIN_PANEL:-1}
 
 typeset -ga _armin_items      # what the open menu shows
 typeset -ga _armin_marks      # per item: matched ranges, "start-end,..."
@@ -28,6 +30,8 @@ typeset -ga _armin_lines      # per item: the line that picking it leaves
 typeset -ga _armin_descs      # per item: where its description starts, if any
 typeset -gi _armin_col=0      # the buffer column the menu lines up under
 typeset -gi _armin_prompt=0   # the width of the prompt's last line
+typeset -g  _armin_mode=history # what the menu lists: history, or complete
+typeset -ga _armin_info       # the panel's lines about the selected command
 typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
 typeset -gi _armin_top=1      # the item on the menu's first row
 typeset -g  _armin_typed=''   # the buffer the menu was computed for
@@ -80,6 +84,8 @@ _armin_close() {
   _armin_lines=()
   _armin_descs=()
   _armin_col=0
+  _armin_info=()
+  _armin_mode=history
   _armin_clear_display
 }
 
@@ -91,6 +97,8 @@ _armin_compute() {
   _armin_lines=()
   _armin_descs=()
   _armin_col=0
+  _armin_info=()
+  _armin_mode=history
   _armin_sel=0
   _armin_top=1
   _armin_typed=$BUFFER
@@ -106,6 +114,8 @@ _armin_predict() {
   _armin_lines=()
   _armin_descs=()
   _armin_col=0
+  _armin_info=()
+  _armin_mode=history
   _armin_sel=0
   _armin_top=1
   _armin_typed=$BUFFER
@@ -263,7 +273,7 @@ _armin_complete() {
     _armin_items+=( "$items[i+1]" ) _armin_marks+=( "$marks[i+1]" ) _armin_lines+=( "$lines[i+1]" )
     _armin_descs+=( $descs[i+1] )
   done
-  _armin_sel=0 _armin_top=1
+  _armin_sel=0 _armin_top=1 _armin_mode=complete
   # Under the word being completed.
   _armin_col=$(( ${#BUFFER} - _armin_ccut[1] ))
   _armin_move 1
@@ -295,16 +305,52 @@ _armin_render() {
     (( ${#item} > width )) && width=${#item}
   done
   (( width > COLUMNS - 4 )) && width=$(( COLUMNS - 4 ))
+  # With the panel on, the menu leaves it room: at most 60% of the pane, and
+  # the panel shows in full what a row cuts short.
+  (( ARMIN_PANEL && width > COLUMNS * 6 / 10 && COLUMNS * 6 / 10 >= 30 )) &&
+    width=$(( COLUMNS * 6 / 10 ))
 
   # Line up under the word: past the prompt and the buffer before it, and
   # left of the pane's edge.
   local -i indent=$(( (_armin_prompt + _armin_col) % COLUMNS ))
-  (( indent > COLUMNS - width - 2 )) && indent=$(( COLUMNS - width - 2 ))
+  # A row as wide as the pane would wrap onto a blank line: keep one free.
+  (( indent > COLUMNS - width - 3 )) && indent=$(( COLUMNS - width - 3 ))
   (( indent < 0 )) && indent=0
   local pad=${(l:indent:)}
 
+  # The panel beside the menu, about the selected row: the whole command or
+  # description when the row cuts it short, then what armin knows of it.
+  # Only where it fits.
+  local -a panel src
+  local -i d pw=$(( COLUMNS - indent - width - 6 ))
+  if (( ARMIN_PANEL && _armin_sel && pw >= 20 )); then
+    local sel=${_armin_items[_armin_sel]} l
+    if [[ $_armin_mode == complete ]]; then
+      d=${_armin_descs[_armin_sel]:--1}
+      (( d >= 0 && ${#sel} > width )) && src=( "${sel[d+5,-1]}" )
+    else
+      if (( ${#sel} > width )) || [[ $sel == *$'\n'* ]]; then
+        src=( "${(@f)sel}" )
+        (( ${#_armin_info} )) && src+=( '' )
+      fi
+      src+=( "${_armin_info[@]}" )
+    fi
+    # Wrapped at spaces where there are some.
+    local head
+    for l in "${src[@]}"; do
+      while (( ${#l} > pw )); do
+        head=${l[1,pw+1]}
+        if [[ ${head[2,-1]} == *' '* ]]; then head=${head% *}; else head=${l[1,pw]}; fi
+        panel+=( "$head" )
+        l=${${l[${#head}+1,-1]}# }
+      done
+      panel+=( "$l" )
+    done
+    (( ${#panel} > rows + 4 )) && panel=( "${(@)panel[1,rows+4]}" )
+  fi
+
   local text='' range
-  local -i base=${#BUFFER} off d
+  local -i base=${#BUFFER} off
   local -a hl parts seg
   local part
 
@@ -331,6 +377,10 @@ _armin_render() {
       (( d + 1 < e )) && d=$(( e - 1 ))
       parts+=( "$(( 1 + d )) $(( 1 + width )) $ARMIN_HL_DESCRIPTION" )
     fi
+    if (( i <= ${#panel} )); then
+      hl+=( "$(( off + width + 3 )) $(( off + width + 4 )) $ARMIN_HL_PANEL,memo=armin" )
+      text+=" │ ${panel[i]}"
+    fi
     if (( at == _armin_sel )); then
       s=0
       for part in $parts; do
@@ -346,6 +396,13 @@ _armin_render() {
         hl+=( "$(( off + seg[1] )) $(( off + seg[2] )) $seg[3],memo=armin" )
       done
     fi
+  done
+  # A panel taller than the menu goes on below it.
+  for (( i = rows + 1; i <= ${#panel}; i++ )); do
+    text+=$'\n'$pad${(l:width+2:)}
+    off=$(( base + ${#text} ))
+    hl+=( "$(( off + 1 )) $(( off + 2 )) $ARMIN_HL_PANEL,memo=armin" )
+    text+=" │ ${panel[i]}"
   done
   (( total > rows )) && text+=$'\n'$pad" ${(l:${#total}:)$(( _armin_sel ? _armin_sel : _armin_top ))}/$total"
 
@@ -405,6 +462,12 @@ _armin_move() {
   local -i n=${#_armin_items}
   _armin_sel=$(( (_armin_sel - 1 + $1 + n) % n + 1 ))
   _armin_set_buffer "${_armin_lines[_armin_sel]}"
+  # What armin knows about a command from history, for the panel.
+  _armin_info=()
+  if (( ARMIN_PANEL )) && [[ $_armin_mode == history ]] &&
+     _armin_ask details "${_armin_items[_armin_sel]}"; then
+    _armin_info=( "${(@f)_armin_reply}" )
+  fi
   _armin_render
 }
 
