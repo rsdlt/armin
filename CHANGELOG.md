@@ -7,6 +7,8 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-26
+
 ### Fixed
 
 - Loading armin twice in one shell, as `source ~/.zshrc` does, made `Tab`, `Ctrl-C` and (after
@@ -115,7 +117,8 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_MAX_ROWS`, `ARMIN_HL_MATCH`, `ARMIN_HL_SELECTED` and `ARMIN_HL_GHOST` set the menu's
   height and colors.
 
-[Unreleased]: https://github.com/rsdlt/armin/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rsdlt/armin/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/rsdlt/armin/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rsdlt/armin/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rsdlt/armin/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rsdlt/armin/compare/v0.2.0...v0.3.0
