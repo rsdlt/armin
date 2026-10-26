@@ -14,12 +14,7 @@ armin opens a menu under your prompt as you type, listing the commands you're mo
 after. It learns from your history: what you run often, what you ran lately, and what you
 run in this directory. `Tab` to pick, `Enter` to run it.
 
-```
-% git s
- git status
- git stash pop
- git switch staging
-```
+![armin in a shell: Tab on an empty line predicts git commit after git add, with a panel of how often it ran; typing car opens a menu of cargo commands from history; git switch lists the branch used most first; ls - lists its flags with descriptions in a scrolling menu](docs/demo.gif)
 
 ## Why armin
 

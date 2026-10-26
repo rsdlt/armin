@@ -9,6 +9,7 @@ All notable changes to armin are documented here. The format follows
 
 ### Added
 
+- A logo, and a demo GIF in the README, recorded with vhs from `docs/demo.sh`.
 - `ARMIN_HL_DESCRIPTION` colors a completion's description, grey by default, so the
   candidates stand out from it.
 - `armin import` says when your zsh history has no times, and how to have zsh keep them.

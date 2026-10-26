@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1200 640" width="1200" height="640">
+  <!-- The demo GIF's title card; docs/demo.sh renders it and puts it in front of the recording. -->
+  <rect width="1200" height="640" fill="#1a1b26"/>
+  <image x="490" y="110" width="220" height="220" xlink:href="logo.svg"/>
+  <g font-family="JetBrains Mono, Menlo, monospace" text-anchor="middle">
+    <text x="600" y="410" font-size="72" font-weight="700" fill="#c0caf5">armin</text>
+    <text x="600" y="478" font-size="28" fill="#9aa5ce">Autocomplete for zsh that reads the battlefield.</text>
+    <text x="600" y="520" font-size="28" fill="#9aa5ce">A menu of your next move, as you type.</text>
+  </g>
+</svg>
