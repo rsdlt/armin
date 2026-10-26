@@ -7,6 +7,23 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A daemon keeps your history in memory and answers each keystroke over a socket, so typing
+  no longer starts a process. The shell starts it, and it restarts itself after an upgrade;
+  `armin daemon stop` stops it.
+- `armin bench` replays your history one key at a time and counts the keystrokes armin saves,
+  next to zsh-autosuggestions.
+
+### Changed
+
+- `Tab` puts the selected command on the line as you move through the menu, and `Enter` runs
+  it: one key fewer per pick. `Esc` puts back what you typed.
+
+### Removed
+
+- `ARMIN_HL_GHOST`: with the selection on the line, there is no grey text after the cursor.
+
 ## [0.1.0] - 2026-10-24
 
 ### Added

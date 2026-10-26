@@ -6,7 +6,8 @@
 //! command starting with what's typed. A command costs the fewest keys either
 //! way could finish it in:
 //!
-//! - armin: the characters typed, a Tab per row down the menu, and Enter.
+//! - armin: the characters typed, and a Tab per row down the menu, which puts
+//!   that row on the line.
 //! - zsh-autosuggestions: the characters typed, and → once its guess is right.
 //!
 //! Neither beats typing the whole command, and running it takes an Enter
@@ -67,15 +68,15 @@ pub fn run(events: &[Event], last: usize, rows: usize) -> Report {
 
         let mut best = len;
         for (k, &end) in ends.iter().enumerate().map(|(k, end)| (k + 1, end)) {
-            // Picking costs at least a Tab and an Enter on top.
-            if k + 2 >= best {
+            // Picking costs at least a Tab on top.
+            if k + 1 >= best {
                 break;
             }
             let start = Instant::now();
             let menu = index.suggest(&command[..end], cwd, e.time, rows);
             report.latencies.push(start.elapsed());
             if let Some(row) = menu.iter().position(|s| s.command == command) {
-                best = best.min(k + row + 2);
+                best = best.min(k + row + 1);
             }
         }
         report.armin += best;
@@ -123,7 +124,7 @@ impl Report {
             ));
         }
         out.push_str(
-            "armin counts the Tabs and the Enter to pick from its menu; zsh-autosuggestions, the → to accept.\n",
+            "armin counts the Tabs to pick from its menu; zsh-autosuggestions, the → to accept.\n",
         );
         if !self.latencies.is_empty() {
             let mut sorted = self.latencies.clone();
@@ -176,7 +177,7 @@ mod tests {
         // recently. Replaying "git status":
         // - zsh-autosuggestions guesses "git stash" until "git stat", 8 keys
         //   in, then → makes 9.
-        // - armin has "git status" on top after "g": 1 + Tab + Enter = 3.
+        // - armin has "git status" on top after "g": 1 + Tab = 2.
         let events = [
             ok("git status", 1),
             ok("git status", 2),
@@ -187,7 +188,7 @@ mod tests {
         assert_eq!((report.total, report.replayed), (4, 1));
         assert_eq!(report.typed, 10);
         assert_eq!(report.autosuggest, 9);
-        assert_eq!(report.armin, 3);
+        assert_eq!(report.armin, 2);
     }
 
     #[test]
@@ -198,7 +199,7 @@ mod tests {
 
     #[test]
     fn lower_rows_cost_tabs() {
-        // "make lint" is second after "m": 1 + 2 Tabs + Enter = 4.
+        // "make lint" is second after "m": 1 + 2 Tabs = 3.
         let events = [
             ok("make test", 1),
             ok("make test", 2),
@@ -206,7 +207,7 @@ mod tests {
             ok("make lint", 4),
         ];
         let report = run(&events, 1, 8);
-        assert_eq!(report.armin, 4);
+        assert_eq!(report.armin, 3);
     }
 
     #[test]

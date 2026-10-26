@@ -27,8 +27,9 @@ run in this directory ahead of those.
 
 Keys while the menu is open:
   Tab/S-Tab  C-n/C-p  move through the menu
-  Enter               put the selected command on the line (Enter again runs it)
-  Esc                 close the menu
+                      (the selected command goes on the line as you move)
+  Enter               run the line
+  Esc                 put back what you typed and close the menu
 With the menu closed, keys do what they always did: Tab still completes.
 
 History lives in ~/.local/share/armin/history ($ARMIN_DATA_DIR or

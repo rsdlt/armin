@@ -4,9 +4,10 @@
 # colors in region_highlight, tagged memo=armin so other plugins' highlights
 # survive. zsh then redraws, scrolls and clears it like the buffer itself.
 #
-# Keys while the menu is open: Tab / Shift-Tab and Ctrl-N / Ctrl-P move,
-# Enter fills the line with the selection (it does not run it), Esc closes.
-# With the menu closed, every key does what it did before.
+# Keys while the menu is open: Tab / Shift-Tab and Ctrl-N / Ctrl-P move, and
+# the selection is put on the line as you move. Enter runs the line, Esc puts
+# back what you typed and closes. With the menu closed, every key does what it
+# did before.
 
 zmodload zsh/datetime zsh/parameter zsh/system zsh/net/socket
 autoload -Uz add-zle-hook-widget add-zsh-hook
@@ -17,11 +18,11 @@ typeset -g  _armin_version=__ARMIN_VERSION__
 typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
 typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
 typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
-typeset -g  ARMIN_HL_GHOST=${ARMIN_HL_GHOST:-fg=8}
 
 typeset -ga _armin_items      # commands the open menu shows
 typeset -ga _armin_marks      # per item: matched ranges, "start-end,..."
 typeset -gi _armin_sel=0      # 1-based selection; 0 means nothing selected
+typeset -g  _armin_typed=''   # the buffer the menu was computed for
 typeset -g  _armin_seen=''    # buffer and cursor the menu was computed for
 typeset -gi _armin_open=0
 
@@ -75,6 +76,7 @@ _armin_compute() {
   _armin_items=()
   _armin_marks=()
   _armin_sel=0
+  _armin_typed=$BUFFER
   [[ -z $BUFFER || $BUFFER == *$'\n'* ]] && return
   (( CURSOR == ${#BUFFER} )) || return
   local out item
@@ -113,15 +115,9 @@ _armin_render() {
   done
   (( width > COLUMNS - 4 )) && width=$(( COLUMNS - 4 ))
 
-  # Ghost text: the rest of the selected item, right after the cursor. A fuzzy
-  # match doesn't continue what was typed, so it gets none.
-  local ghost='' sel=${_armin_items[_armin_sel]}
-  (( _armin_sel )) && [[ $sel == "$BUFFER"* ]] && ghost=${sel#"$BUFFER"}
-
-  local text=$ghost range
+  local text='' range
   local -i base=${#BUFFER} off
   local -a hl
-  (( ${#ghost} )) && hl+=( "$base $(( base + ${#ghost} )) $ARMIN_HL_GHOST,memo=armin" )
 
   for (( i = 1; i <= rows; i++ )); do
     item=${shown[i]}
@@ -160,10 +156,26 @@ _armin_line_finish() {
   _armin_close
 }
 
+# Puts `text` on the line without asking armin again, so the menu stays the
+# one computed for what was typed.
+_armin_set_buffer() {
+  BUFFER=$1
+  CURSOR=${#BUFFER}
+  _armin_seen="$CURSOR:$BUFFER"
+}
+
+# Moves the selection and puts it on the line.
 _armin_move() {
   local -i n=${#_armin_items}
   _armin_sel=$(( (_armin_sel - 1 + $1 + n) % n + 1 ))
+  _armin_set_buffer "${_armin_items[_armin_sel]}"
   _armin_render
+}
+
+# Esc puts back what was typed before Tab filled the line.
+_armin_dismiss() {
+  (( _armin_sel )) && _armin_set_buffer "$_armin_typed"
+  _armin_close
 }
 
 # ── Keys ────────────────────────────────────────────────────────────────────
@@ -182,21 +194,7 @@ _armin_next()   { _armin_or_fallback next   _armin_move 1 }
 _armin_prev()   { _armin_or_fallback prev   _armin_move -1 }
 _armin_down()   { _armin_or_fallback down   _armin_move 1 }
 _armin_up()     { _armin_or_fallback up     _armin_move -1 }
-_armin_escape() { _armin_or_fallback escape _armin_close }
-
-# Enter fills the line with the selection; with nothing selected it runs the
-# line as usual.
-_armin_accept() {
-  if (( _armin_open && _armin_sel )); then
-    BUFFER=${_armin_items[_armin_sel]}
-    CURSOR=${#BUFFER}
-    _armin_seen="$CURSOR:$BUFFER"
-    _armin_close
-  else
-    _armin_close
-    zle "${_armin_fallback[accept]:-accept-line}"
-  fi
-}
+_armin_escape() { _armin_or_fallback escape _armin_dismiss }
 
 # Bind in main, the keymap the user types in (emacs, or viins when $EDITOR
 # names vi). A key's old widget becomes its fallback; a prefix key such as Esc
@@ -214,7 +212,6 @@ _armin_bind next   '^I'
 _armin_bind prev   '^[[Z'
 _armin_bind down   '^N'
 _armin_bind up     '^P'
-_armin_bind accept '^M'
 _armin_bind escape '^['
 # Esc only fires after KEYTIMEOUT (default 0.4s) in case it starts a longer
 # sequence such as an arrow key. Shorten it so closing feels instant.

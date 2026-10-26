@@ -10,7 +10,7 @@
 
 armin opens a menu under your prompt as you type, listing the commands you're most likely
 after. It learns from your history: what you run often, what you ran lately, and what you
-run in this directory. `Tab` to pick, `Enter` to put it on the line.
+run in this directory. `Tab` to pick, `Enter` to run it.
 
 ```
 % git s
@@ -63,13 +63,13 @@ Start typing. The menu opens after the first character and follows every keystro
 
 | Key | Action |
 |---|---|
-| `Tab` `S-Tab` | move through the menu |
-| `C-n` `C-p` | move through the menu |
-| `Enter` | put the selected command on the line; `Enter` again runs it |
-| `Esc` | close the menu |
+| `Tab` `S-Tab` | move through the menu, putting the selected command on the line |
+| `C-n` `C-p` | the same |
+| `Enter` | run the line |
+| `Esc` | put back what you typed and close the menu |
 
-The selected command also shows as grey text after your cursor. `Enter` never runs a
-command you haven't looked at: with nothing selected, it runs the line as typed, like always.
+You see the whole command on the line before `Enter` runs it. Keep typing instead, and you
+edit the command you picked.
 
 With the menu closed, every key does what it did before: `Tab` still completes files and
 flags, and in vi mode `Esc` still enters command mode.
@@ -102,7 +102,6 @@ Set these before the `eval` line:
 | `ARMIN_MAX_ROWS` | `8` | how many suggestions the menu shows |
 | `ARMIN_HL_MATCH` | `bold` | the letters that match what you typed |
 | `ARMIN_HL_SELECTED` | `standout` | the selected row |
-| `ARMIN_HL_GHOST` | `fg=8` | the grey text after the cursor |
 
 Colors use zsh's highlight syntax, like `fg=blue,bold`, and default to your terminal's palette.
 
