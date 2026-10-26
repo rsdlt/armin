@@ -61,9 +61,14 @@ completion system too, if your `~/.zshrc` doesn't already:
 autoload -Uz compinit && compinit
 ```
 
-If zsh then warns about insecure directories, Homebrew's are group-writable; `compaudit |
-xargs chmod g-w` fixes them. Until they're fixed, `compinit -i` skips them, and with them
-the completions Homebrew installed.
+If zsh then warns about insecure directories, Homebrew's are group-writable; this fixes them:
+
+```sh
+autoload -Uz compaudit && compaudit | xargs chmod g-w
+```
+
+Until they're fixed, `compinit -i` skips them, and with them the completions Homebrew
+installed.
 
 armin draws where zsh-autosuggestions does, so remove that plugin. zsh-syntax-highlighting
 works alongside armin. fzf-tab does what armin does on `Tab`, so use one of the two.
