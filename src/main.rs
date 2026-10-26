@@ -20,6 +20,11 @@ Usage: eval \"$(armin init zsh)\"     in ~/.zshrc
        armin import [file]          bring in your zsh history (default ~/.zsh_history)
        armin bench [--last <n>]     replay your last n commands (default 2000) and
                                     count the keystrokes armin saves
+       armin daemon stop            stop the daemon; the next keystroke starts it
+
+Options:
+  -h, --help     this help; `armin <command> --help` for one command's
+  -v, --version  armin's version
 
 As you type, a menu under the prompt lists the commands you're most likely
 after: the ones you run often and lately, ahead of the rest, and the ones you
@@ -46,9 +51,86 @@ Called by the shell, not by you:
   armin record --time <t> --duration <ms> --exit <code> --session <id> --cwd <dir> -- <command>
 ";
 
+const INIT_HELP: &str = "\
+Usage: armin init zsh
+
+Prints the zsh side of armin: the menu, its keys, and the hooks that record
+each command you run. Put this in ~/.zshrc, after anything that binds Tab:
+
+  eval \"$(armin init zsh)\"
+
+zsh is the only shell armin speaks for now.
+";
+
+const IMPORT_HELP: &str = "\
+Usage: armin import [file]
+
+Adds a zsh history file to armin's history, ~/.zsh_history if you name none.
+Commands already there are skipped, so importing twice changes nothing.
+
+zsh keeps times only with `setopt extended_history`. Without them, imported
+commands count as run one second apart, ending when you import, in no
+directory in particular. Runs armin records itself carry both.
+";
+
+const BENCH_HELP: &str = "\
+Usage: armin bench [--last <n>]
+
+Replays your last n commands (default 2000), typing each one key at a time,
+and counts the keystrokes it takes with armin and with zsh-autosuggestions.
+For each command, armin knows only what ran before it.
+
+  armin: the characters typed, and a Tab per row down the menu.
+  zsh-autosuggestions: the characters typed, and → once its guess is right.
+
+Also prints how long each of armin's answers took.
+";
+
+const DAEMON_HELP: &str = "\
+Usage: armin daemon [stop]
+
+The shell starts the daemon by itself: it keeps your history in memory and
+answers each keystroke over a socket next to the history file. It restarts
+itself when armin is upgraded.
+
+  armin daemon stop   stop it; the next keystroke starts it again
+";
+
+const SUGGEST_HELP: &str = "\
+Usage: armin suggest --cwd <dir> [--limit <n>] -- <typed>
+
+Called by the shell when the daemon isn't running. Prints up to n suggestions
+(default 8) for what's typed, each as its matched ranges, a tab, the command
+and a NUL.
+";
+
+const RECORD_HELP: &str = "\
+Usage: armin record --time <t> --duration <ms> --exit <code> --session <id> --cwd <dir> -- <command>
+
+Called by the shell after each command: appends the command to armin's
+history, with when and where it ran and how it ended.
+";
+
+/// The help for `command`, if armin has one by that name.
+fn help_for(command: &str) -> Option<&'static str> {
+    Some(match command {
+        "init" => INIT_HELP,
+        "import" => IMPORT_HELP,
+        "bench" => BENCH_HELP,
+        "daemon" => DAEMON_HELP,
+        "suggest" => SUGGEST_HELP,
+        "record" => RECORD_HELP,
+        _ => return None,
+    })
+}
+
+fn is_help(arg: &str) -> bool {
+    arg == "-h" || arg == "--help"
+}
+
 /// What the command line asks for.
 enum Cli {
-    Help,
+    Help(&'static str),
     Version,
     Init,
     Import(Option<PathBuf>),
@@ -63,13 +145,36 @@ enum Cli {
     Record(Event),
 }
 
+/// The command line, or what's wrong with it and where to read more.
 fn parse_args(args: &[String]) -> Result<Cli, String> {
     let Some((cmd, rest)) = args.split_first() else {
-        return Ok(Cli::Help);
+        return Ok(Cli::Help(HELP));
     };
     match cmd.as_str() {
-        "-h" | "--help" | "help" => Ok(Cli::Help),
+        "-h" | "--help" => Ok(Cli::Help(HELP)),
+        "help" => match rest {
+            [] => Ok(Cli::Help(HELP)),
+            [command] => help_for(command)
+                .map(Cli::Help)
+                .ok_or(format!("no help for '{command}' (see armin --help)")),
+            _ => Err("help takes at most one command (see armin --help)".into()),
+        },
         "-V" | "-v" | "--version" => Ok(Cli::Version),
+        command => {
+            let Some(help) = help_for(command) else {
+                return Err(format!("unknown command '{command}' (see armin --help)"));
+            };
+            // -h before a --: what follows it is the shell's text, not a flag.
+            if rest.iter().take_while(|a| *a != "--").any(|a| is_help(a)) {
+                return Ok(Cli::Help(help));
+            }
+            parse_command(command, rest).map_err(|e| format!("{e} (see armin {command} --help)"))
+        }
+    }
+}
+
+fn parse_command(cmd: &str, rest: &[String]) -> Result<Cli, String> {
+    match cmd {
         "init" => match rest {
             [shell] if shell == "zsh" => Ok(Cli::Init),
             [shell] => Err(format!("armin speaks zsh only for now, not '{shell}'")),
@@ -77,6 +182,7 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
         },
         "import" => match rest {
             [] => Ok(Cli::Import(None)),
+            [flag] if flag.starts_with('-') => Err(format!("unknown option '{flag}'")),
             [file] => Ok(Cli::Import(Some(file.into()))),
             _ => Err("import takes at most one file".into()),
         },
@@ -117,7 +223,7 @@ fn parse_args(args: &[String]) -> Result<Cli, String> {
                 command,
             }))
         }
-        other => Err(format!("unknown command '{other}'")),
+        other => unreachable!("no parser for '{other}'"),
     }
 }
 
@@ -164,8 +270,8 @@ fn split_command(args: &[String]) -> Result<(Flags, String), String> {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match parse_args(&args) {
-        Ok(Cli::Help) => {
-            print!("{HELP}");
+        Ok(Cli::Help(help)) => {
+            print!("{help}");
             return ExitCode::SUCCESS;
         }
         Ok(Cli::Version) => {
@@ -188,7 +294,7 @@ fn main() -> ExitCode {
             history::log_path().and_then(|log| history::append(&log, &[event]))
         }
         Err(e) => {
-            eprintln!("armin: {e} (see --help)");
+            eprintln!("armin: {e}");
             return ExitCode::from(2);
         }
     };

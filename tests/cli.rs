@@ -133,13 +133,57 @@ fn bad_arguments() {
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(
         stderr(&out),
-        "armin: armin speaks zsh only for now, not 'fish' (see --help)\n"
+        "armin: armin speaks zsh only for now, not 'fish' (see armin init --help)\n"
     );
 
     let out = armin(data.path(), &["record", "--time", "soon", "--", "ls"]);
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(
         stderr(&out),
-        "armin: --time wants a number, not 'soon' (see --help)\n"
+        "armin: --time wants a number, not 'soon' (see armin record --help)\n"
+    );
+}
+
+#[test]
+fn help_and_version() {
+    let data = TempDir::new().unwrap();
+    for args in [&["-h"][..], &["--help"], &["help"], &[]] {
+        let out = armin(data.path(), args);
+        assert!(out.status.success());
+        assert!(stdout(&out).contains("Usage: eval"), "{args:?}");
+    }
+    for args in [
+        &["bench", "--help"][..],
+        &["bench", "--last", "5", "-h"],
+        &["help", "bench"],
+    ] {
+        let out = armin(data.path(), args);
+        assert!(out.status.success());
+        assert!(stdout(&out).starts_with("Usage: armin bench"), "{args:?}");
+    }
+    // A file named -h is no file to import.
+    let out = armin(data.path(), &["import", "-h"]);
+    assert!(stdout(&out).starts_with("Usage: armin import"));
+    // After --, --help is what was typed.
+    assert!(suggest(data.path(), "/a", "--help").is_empty());
+
+    for flag in ["-v", "-V", "--version"] {
+        let out = armin(data.path(), &[flag]);
+        assert_eq!(
+            stdout(&out),
+            format!("armin {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    let out = armin(data.path(), &["frob"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(
+        stderr(&out),
+        "armin: unknown command 'frob' (see armin --help)\n"
+    );
+    let out = armin(data.path(), &["import", "--frob"]);
+    assert_eq!(
+        stderr(&out),
+        "armin: unknown option '--frob' (see armin import --help)\n"
     );
 }

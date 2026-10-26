@@ -7,6 +7,15 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--help` (or `-h`) after any command shows that command's help, as does `armin help
+  <command>`. A wrong argument points to the help for its command.
+
+### Fixed
+
+- `armin import -h` read a file named `-h`.
+
 ## [0.2.0] - 2026-10-26
 
 ### Added
