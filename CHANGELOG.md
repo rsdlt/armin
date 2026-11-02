@@ -7,6 +7,8 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-02
+
 ### Changed
 
 - Suggestions in the menu are grey, so they read apart from what you type. `ARMIN_HL_TEXT`, or
@@ -122,7 +124,8 @@ All notable changes to armin are documented here. The format follows
 - `ARMIN_MAX_ROWS`, `ARMIN_HL_MATCH`, `ARMIN_HL_SELECTED` and `ARMIN_HL_GHOST` set the menu's
   height and colors.
 
-[Unreleased]: https://github.com/rsdlt/armin/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/rsdlt/armin/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rsdlt/armin/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/rsdlt/armin/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/rsdlt/armin/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/rsdlt/armin/compare/v0.3.0...v0.4.0
