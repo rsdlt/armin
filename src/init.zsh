@@ -18,6 +18,7 @@ typeset -g  _armin_bin=__ARMIN_BIN__
 typeset -g  _armin_sock=__ARMIN_SOCK__
 typeset -g  _armin_version=__ARMIN_VERSION__
 typeset -g  ARMIN_MAX_ROWS=${ARMIN_MAX_ROWS:-8}
+typeset -g  ARMIN_HL_TEXT=${ARMIN_HL_TEXT:-fg=8}
 typeset -g  ARMIN_HL_MATCH=${ARMIN_HL_MATCH:-bold}
 typeset -g  ARMIN_HL_SELECTED=${ARMIN_HL_SELECTED:-standout}
 typeset -g  ARMIN_HL_DESCRIPTION=${ARMIN_HL_DESCRIPTION:-fg=8}
@@ -353,7 +354,7 @@ _armin_render() {
   local text='' range
   local -i base=${#BUFFER} off
   local -a hl parts seg
-  local part
+  local part style over
 
   for (( i = 1; i <= rows; i++ )); do
     at=$(( _armin_top + i - 1 ))
@@ -364,7 +365,7 @@ _armin_render() {
     text+=" ${(r:width:)item} "
     # The row's styled stretches, in order and apart: where one range ends
     # inside another, zsh resets every attribute and never restores the outer
-    # one. So the selected row is cut into pieces, each with its whole style.
+    # one. So each row is cut into pieces, each with its whole style.
     parts=()
     for range in ${(s:,:)_armin_marks[at]}; do
       s=${range%-*} e=${range#*-}
@@ -382,21 +383,19 @@ _armin_render() {
       hl+=( "$(( off + width + 3 )) $(( off + width + 4 )) $ARMIN_HL_PANEL,memo=armin" )
       text+=" │ ${panel[i]}"
     fi
-    if (( at == _armin_sel )); then
-      s=0
-      for part in $parts; do
-        seg=( ${=part} )
-        (( s < seg[1] )) && hl+=( "$(( off + s )) $(( off + seg[1] )) $ARMIN_HL_SELECTED,memo=armin" )
-        hl+=( "$(( off + seg[1] )) $(( off + seg[2] )) $ARMIN_HL_SELECTED,$seg[3],memo=armin" )
-        s=$seg[2]
-      done
-      (( s < width + 2 )) && hl+=( "$(( off + s )) $(( off + width + 2 )) $ARMIN_HL_SELECTED,memo=armin" )
-    else
-      for part in $parts; do
-        seg=( ${=part} )
-        hl+=( "$(( off + seg[1] )) $(( off + seg[2] )) $seg[3],memo=armin" )
-      done
-    fi
+    # Between the pieces, the selected row's style or the plain text's. The
+    # selected row keeps its own colors under a piece; the others don't carry
+    # the text's color into it, so a match can stand out from the grey.
+    style=$ARMIN_HL_TEXT over=''
+    (( at == _armin_sel )) && style=$ARMIN_HL_SELECTED over=$ARMIN_HL_SELECTED,
+    s=0
+    for part in $parts; do
+      seg=( ${=part} )
+      (( s < seg[1] )) && hl+=( "$(( off + s )) $(( off + seg[1] )) $style,memo=armin" )
+      hl+=( "$(( off + seg[1] )) $(( off + seg[2] )) $over$seg[3],memo=armin" )
+      s=$seg[2]
+    done
+    (( s < width + 2 )) && hl+=( "$(( off + s )) $(( off + width + 2 )) $style,memo=armin" )
   done
   # A panel taller than the menu goes on below it.
   for (( i = rows + 1; i <= ${#panel}; i++ )); do

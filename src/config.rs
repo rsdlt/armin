@@ -25,6 +25,7 @@ panel = true          # the panel beside the menu, about the selected row
 # Each color in zsh's highlight syntax, like "fg=blue,bold" or "fg=108".
 # These replace the theme's.
 [colors]
+# text = "fg=8"            # a suggestion, so it reads apart from what you type
 # match = "bold"            # the letters that match what you typed
 # selected = "standout"     # the selected row
 # description = "fg=8"      # a completion's description
@@ -52,6 +53,7 @@ struct Menu {
 #[derive(Deserialize, Default, Clone)]
 #[serde(deny_unknown_fields)]
 struct Colors {
+    text: Option<String>,
     #[serde(rename = "match")]
     matched: Option<String>,
     selected: Option<String>,
@@ -59,14 +61,14 @@ struct Colors {
     panel: Option<String>,
 }
 
-/// A theme's colors: match, selected, description, panel.
-fn theme(name: &str) -> Option<[&'static str; 4]> {
+/// A theme's colors: text, match, selected, description, panel.
+fn theme(name: &str) -> Option<[&'static str; 5]> {
     Some(match name {
-        "default" => ["bold", "standout", "fg=8", "fg=8"],
+        "default" => ["fg=8", "bold", "standout", "fg=8", "fg=8"],
         // The Survey Corps' cloak and a map's parchment.
-        "survey-corps" => ["fg=71,bold", "fg=230,bg=22", "fg=137", "fg=137"],
+        "survey-corps" => ["fg=144", "fg=71,bold", "fg=230,bg=22", "fg=137", "fg=137"],
         // Steam and fire.
-        "colossal" => ["fg=208,bold", "fg=232,bg=208", "fg=244", "fg=202"],
+        "colossal" => ["fg=250", "fg=208,bold", "fg=232,bg=208", "fg=244", "fg=202"],
         _ => return None,
     })
 }
@@ -96,10 +98,11 @@ pub fn zsh_defaults(text: Option<&str>) -> Result<String> {
 
     let mut settings: Vec<(&str, String)> = Vec::new();
     if let Some(name) = &file.theme {
-        let Some([matched, selected, description, panel]) = theme(name) else {
+        let Some([text, matched, selected, description, panel]) = theme(name) else {
             bail!("no theme called '{name}': try default, survey-corps or colossal");
         };
         settings.extend([
+            ("ARMIN_HL_TEXT", text.to_owned()),
             ("ARMIN_HL_MATCH", matched.to_owned()),
             ("ARMIN_HL_SELECTED", selected.to_owned()),
             ("ARMIN_HL_DESCRIPTION", description.to_owned()),
@@ -108,6 +111,7 @@ pub fn zsh_defaults(text: Option<&str>) -> Result<String> {
     }
     let colors = file.colors;
     for (name, value) in [
+        ("ARMIN_HL_TEXT", colors.text),
         ("ARMIN_HL_MATCH", colors.matched),
         ("ARMIN_HL_SELECTED", colors.selected),
         ("ARMIN_HL_DESCRIPTION", colors.description),
@@ -180,7 +184,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             out,
-            "typeset -g ARMIN_HL_MATCH=\"${ARMIN_HL_MATCH:-fg=71,bold}\"\n\
+            "typeset -g ARMIN_HL_TEXT=\"${ARMIN_HL_TEXT:-fg=144}\"\n\
+             typeset -g ARMIN_HL_MATCH=\"${ARMIN_HL_MATCH:-fg=71,bold}\"\n\
              typeset -g ARMIN_HL_DESCRIPTION=\"${ARMIN_HL_DESCRIPTION:-fg=137}\"\n\
              typeset -g ARMIN_HL_PANEL=\"${ARMIN_HL_PANEL:-fg=137}\"\n\
              typeset -g ARMIN_HL_SELECTED=\"${ARMIN_HL_SELECTED:-fg=black,bg=green}\"\n\

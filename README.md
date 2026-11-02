@@ -159,6 +159,7 @@ Each setting is also a variable. One set before the `eval` line wins over the fi
 | Variable | Default | |
 |---|---|---|
 | `ARMIN_MAX_ROWS` | `8` | how many suggestions the menu shows |
+| `ARMIN_HL_TEXT` | `fg=8` | a suggestion, so it reads apart from what you type; `none` for your terminal's text color |
 | `ARMIN_HL_MATCH` | `bold` | the letters that match what you typed |
 | `ARMIN_HL_SELECTED` | `standout` | the selected row |
 | `ARMIN_HL_DESCRIPTION` | `fg=8` | a completion's description |

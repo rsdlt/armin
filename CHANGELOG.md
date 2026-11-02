@@ -7,6 +7,11 @@ All notable changes to armin are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Suggestions in the menu are grey, so they read apart from what you type. `ARMIN_HL_TEXT`, or
+  `text` under `[colors]`, sets the color; `none` brings back your terminal's text color.
+
 ## [0.5.1] - 2026-10-26
 
 ### Fixed
